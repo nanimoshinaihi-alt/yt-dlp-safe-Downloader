@@ -1,24 +1,39 @@
 @echo off
 cd /d "%~dp0"
 
-echo [ãƒã‚§ãƒƒã‚¯ä¸­] å¿…è¦ãªãƒ©ã‚¤ãƒ–ãƒ©ãƒª (yt-dlp / customtkinter) ã®ç¢ºèªã‚’è¡Œã£ã¦ã„ã¾ã™...
-python -c "import yt_dlp, customtkinter" 2>nul
-if errorlevel 1 (
-    echo [ã‚»ãƒƒãƒˆã‚¢ãƒƒãƒ—] å¿…è¦ãªãƒ‘ãƒƒã‚±ãƒ¼ã‚¸ (yt-dlp, customtkinter) ã‚’è‡ªå‹•ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã—ã¦ã„ã¾ã™...
-    python -m pip install yt-dlp customtkinter
-    if errorlevel 1 (
-        echo.
-        echo [ã‚¨ãƒ©ãƒ¼] PythonãŒè¦‹ã¤ã‹ã‚‰ãªã„ã‹ã€ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã«å¤±æ•—ã—ã¾ã—ãŸã€‚
-        echo ä»–ã®PCã§å®Ÿè¡Œã™ã‚‹å ´åˆã¯ Python (3.10ä»¥ä¸Š) ã‚’äº‹å‰ã«ã‚¤ãƒ³ã‚¹ãƒˆãƒ¼ãƒ«ã—ã¦ãã ã•ã„ã€‚
-        pause
-        exit /b 1
-    )
-)
+echo ==================================================
+echo  yt-dlp Safe Downloader ‹N“®ƒXƒNƒŠƒvƒg
+echo ==================================================
+echo.
 
-echo [èµ·å‹•ä¸­] yt-dlp Safe Downloader ã‚’èµ·å‹•ã—ã¦ã„ã¾ã™...
+python -c "import yt_dlp, customtkinter" >nul 2>&1
+if errorlevel 1 goto INSTALL_LIB
+goto START_APP
+
+:INSTALL_LIB
+echo [ƒZƒbƒgƒAƒbƒv] •K—v‚Èƒ‰ƒCƒuƒ‰ƒŠ (yt-dlp, customtkinter) ‚ðƒCƒ“ƒXƒg[ƒ‹‚µ‚Ä‚¢‚Ü‚·...
+python -m pip install yt-dlp customtkinter
+if errorlevel 1 goto ERROR_PYTHON
+goto START_APP
+
+:START_APP
+echo [‹N“®’†] ƒAƒvƒŠƒP[ƒVƒ‡ƒ“‚ð‹N“®‚µ‚Ä‚¢‚Ü‚·...
 python gui_app.py
-if errorlevel 1 (
-    echo.
-    echo ã‚¨ãƒ©ãƒ¼ãŒç™ºç”Ÿã—ã¾ã—ãŸã€‚ä¸Šè¨˜ã®ã‚¨ãƒ©ãƒ¼ãƒ¡ãƒƒã‚»ãƒ¼ã‚¸ã‚’ã”ç¢ºèªãã ã•ã„ã€‚
-    pause
-)
+if errorlevel 1 goto ERROR_APP
+exit /b 0
+
+:ERROR_PYTHON
+echo.
+echo [ƒGƒ‰[] Python‚ªŒ©‚Â‚©‚ç‚È‚¢‚©Aƒ‰ƒCƒuƒ‰ƒŠ‚ÌŽ©“®ƒCƒ“ƒXƒg[ƒ‹‚ÉŽ¸”s‚µ‚Ü‚µ‚½B
+echo Python (3.10ˆÈã) ‚ªƒCƒ“ƒXƒg[ƒ‹‚³‚ê‚Ä‚¢‚é‚©‚ð‚²Šm”F‚­‚¾‚³‚¢B
+echo.
+pause
+exit /b 1
+
+:ERROR_APP
+echo.
+echo [ƒGƒ‰[] ƒAƒvƒŠƒP[ƒVƒ‡ƒ“‚ÌŽÀs’†‚ÉƒGƒ‰[‚ª”­¶‚µ‚Ü‚µ‚½B
+echo ã‹L‚ÌƒGƒ‰[ƒƒbƒZ[ƒW‚ð‚²Šm”F‚­‚¾‚³‚¢B
+echo.
+pause
+exit /b 1
