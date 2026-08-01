@@ -192,6 +192,9 @@ class SafeDownloaderGUI(ctk.CTk):
 
         self.format_entry = ctk.CTkEntry(fmt_frame, font=ctk.CTkFont(family=self.current_font_family, size=12))
         saved_fmt = self.config.get("format_spec", PathSafeDownloader.DEFAULT_FORMAT_SPEC)
+        if saved_fmt == "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best":
+            saved_fmt = PathSafeDownloader.DEFAULT_FORMAT_SPEC
+
         self.format_entry.insert(0, saved_fmt)
         self.format_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
 

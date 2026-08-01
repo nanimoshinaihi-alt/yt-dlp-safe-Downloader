@@ -25,14 +25,13 @@ APP_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def update_yt_dlp(status_callback: Optional[Callable[[str], None]] = None) -> bool:
     """
     yt-dlp を最新バージョンに自動更新します。
-    TikTok や各 SNS サイトの仕様変更によるダウンロードエラーを未然に防ぎます。
+    TikTok や YouTube 等の各 SNS サイトの仕様変更によるダウンロードエラーを未然に防ぎます。
     """
     try:
         if status_callback:
             status_callback("yt-dlp の更新チェック中...")
         logger.info("yt-dlp の自動更新チェックを開始します...")
 
-        # pip で yt-dlp を最新版へアップグレード
         cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
 
@@ -79,7 +78,8 @@ class PathSafeDownloader:
         "instagram": ["instagram"]
     }
 
-    DEFAULT_FORMAT_SPEC = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+    # 柔軟で互換性の高い標準フォーマット指定 (無ければ自動で代替最高画質+音声を取得しMP4へ結合)
+    DEFAULT_FORMAT_SPEC = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best"
 
     def __init__(
         self,
@@ -199,25 +199,21 @@ class PathSafeDownloader:
         uploader_id = (info.get("uploader_id") or "").strip()
         uploader = (info.get("uploader") or info.get("channel") or info.get("creator") or "").strip()
 
-        # X (Twitter) の場合: @ なしの純粋なユーザー名/アカウント名
         if site_name == "x.com":
             name = uploader or uploader_id or "Unknown"
             name = name.strip().lstrip("@")
             return name or "Unknown"
 
-        # Instagram の場合
         elif site_name == "instagram":
             handle = uploader
             if not handle or handle.isdigit():
                 handle = info.get("channel") or uploader_id or "Unknown"
             return handle.strip().lstrip("@") or "Unknown"
 
-        # TikTok の場合
         elif site_name == "tiktok":
             handle = uploader_id or uploader or "Unknown"
             return handle.strip().lstrip("@") or "Unknown"
 
-        # その他のサイト (YouTube等)
         else:
             return uploader or uploader_id or "不明"
 
@@ -341,6 +337,7 @@ class PathSafeDownloader:
         opts = {
             "format": self.format_spec,
             "merge_output_format": "mp4",
+            "nocheckcertificate": True,
         }
 
         if self.use_firefox_cookies:
