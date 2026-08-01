@@ -1,7 +1,7 @@
 """
 yt-dlp Safe Downloader GUI Application
 CustomTkinter を使用した見栄えの良いデスクトップ GUI フロントエンド。
-起動時 yt-dlp 自動更新チェック機能付き。
+起動時 yt-dlp 自動更新チェック機能、表示フォントのリアルタイム切替＆保存機能付き。
 """
 
 import os
@@ -21,6 +21,15 @@ ctk.set_default_color_theme("blue")
 
 CONFIG_FILE_PATH = os.path.join(APP_BASE_DIR, "config.json")
 
+# 選択可能なフォントのリスト
+AVAILABLE_FONTS = [
+    "Yu Gothic UI",
+    "Meiryo",
+    "BIZ UDPGothic",
+    "Segoe UI",
+    "MS Gothic"
+]
+
 
 class SafeDownloaderGUI(ctk.CTk):
     PLACEHOLDER_TEXT = "URLを改行区切りで複数並べて入力可能です (例: https://x.com/... / tiktok.com/...)"
@@ -29,7 +38,7 @@ class SafeDownloaderGUI(ctk.CTk):
         super().__init__()
 
         self.title("yt-dlp Safe Downloader")
-        self.geometry("760x660")
+        self.geometry("780x680")
         self.resizable(True, True)
 
         self.is_placeholder_active = False
@@ -37,10 +46,12 @@ class SafeDownloaderGUI(ctk.CTk):
         # 設定ファイルの読み込み
         self.config = self._load_config()
         self.output_dir = self.config.get("output_dir", os.path.abspath("./downloads"))
+        self.current_font_family = self.config.get("font_family", "Yu Gothic UI")
 
         self.downloader = PathSafeDownloader(output_dir=self.output_dir)
 
         self._create_widgets()
+        self._apply_font_family(self.current_font_family)
 
         # ウインドウ閉じるイベントの保存フック
         self.protocol("WM_DELETE_WINDOW", self._on_closing)
@@ -63,15 +74,16 @@ class SafeDownloaderGUI(ctk.CTk):
                     return json.load(f)
             except Exception as e:
                 print(f"設定ファイルの読み込み失敗: {e}")
-        return {"output_dir": os.path.abspath("./downloads")}
+        return {"output_dir": os.path.abspath("./downloads"), "font_family": "Yu Gothic UI"}
 
     def _save_config(self):
-        """現在の設定 (保存先ディレクトリ、オプション等) を config.json へ保存"""
+        """現在の設定 (保存先ディレクトリ、オプション、フォント等) を config.json へ保存"""
         out_dir = self.dir_entry.get().strip() if hasattr(self, 'dir_entry') else self.output_dir
         max_bytes = self.max_bytes_entry.get().strip() if hasattr(self, 'max_bytes_entry') else "240"
         fmt = self.format_entry.get().strip() if hasattr(self, 'format_entry') else PathSafeDownloader.DEFAULT_FORMAT_SPEC
         ff_cookie = self.firefox_cookie_var.get() if hasattr(self, 'firefox_cookie_var') else True
         thumb = self.embed_thumb_var.get() if hasattr(self, 'embed_thumb_var') else True
+        font_fam = self.font_option_menu.get() if hasattr(self, 'font_option_menu') else self.current_font_family
 
         config_data = {
             "output_dir": out_dir,
@@ -79,6 +91,7 @@ class SafeDownloaderGUI(ctk.CTk):
             "format_spec": fmt,
             "use_firefox_cookies": ff_cookie,
             "embed_thumbnail": thumb,
+            "font_family": font_fam,
         }
 
         try:
@@ -101,7 +114,7 @@ class SafeDownloaderGUI(ctk.CTk):
         self.title_label = ctk.CTkLabel(
             self.main_frame,
             text="yt-dlp Safe Downloader",
-            font=ctk.CTkFont(size=20, weight="bold")
+            font=ctk.CTkFont(family=self.current_font_family, size=20, weight="bold")
         )
         self.title_label.pack(pady=(15, 10))
 
@@ -109,13 +122,14 @@ class SafeDownloaderGUI(ctk.CTk):
         url_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         url_frame.pack(padx=20, pady=5, fill="x")
 
-        ctk.CTkLabel(
+        self.url_label = ctk.CTkLabel(
             url_frame,
             text="動画 URL (改行で複数並べて入力できます):",
-            font=ctk.CTkFont(weight="bold")
-        ).pack(anchor="w")
+            font=ctk.CTkFont(family=self.current_font_family, weight="bold")
+        )
+        self.url_label.pack(anchor="w")
 
-        self.url_textbox = ctk.CTkTextbox(url_frame, height=90, font=ctk.CTkFont(size=12))
+        self.url_textbox = ctk.CTkTextbox(url_frame, height=90, font=ctk.CTkFont(family=self.current_font_family, size=12))
         self.url_textbox.pack(pady=5, fill="x")
 
         # プレースホルダーのバインド設定
@@ -127,16 +141,21 @@ class SafeDownloaderGUI(ctk.CTk):
         dir_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         dir_frame.pack(padx=20, pady=5, fill="x")
 
-        ctk.CTkLabel(dir_frame, text="保存先フォルダ:", font=ctk.CTkFont(weight="bold")).pack(anchor="w")
+        self.dir_label = ctk.CTkLabel(dir_frame, text="保存先フォルダ:", font=ctk.CTkFont(family=self.current_font_family, weight="bold"))
+        self.dir_label.pack(anchor="w")
 
         dir_input_frame = ctk.CTkFrame(dir_frame, fg_color="transparent")
         dir_input_frame.pack(fill="x", pady=2)
 
-        self.dir_entry = ctk.CTkEntry(dir_input_frame)
+        self.dir_entry = ctk.CTkEntry(dir_input_frame, font=ctk.CTkFont(family=self.current_font_family, size=12))
         self.dir_entry.insert(0, self.output_dir)
         self.dir_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
-        self.dir_browse_btn = ctk.CTkButton(dir_input_frame, text="参照...", width=80, command=self._browse_dir)
+        self.dir_browse_btn = ctk.CTkButton(
+            dir_input_frame, text="参照...", width=80,
+            font=ctk.CTkFont(family=self.current_font_family, size=12),
+            command=self._browse_dir
+        )
         self.dir_browse_btn.pack(side="right")
 
         # 3. オプション設定エリア
@@ -150,6 +169,7 @@ class SafeDownloaderGUI(ctk.CTk):
         self.firefox_cookie_var = ctk.BooleanVar(value=saved_ff_cookie)
         self.firefox_cookie_cb = ctk.CTkCheckBox(
             cb_frame, text="Firefox クッキーを使用 (--cookies-from-browser firefox)",
+            font=ctk.CTkFont(family=self.current_font_family, size=12),
             variable=self.firefox_cookie_var
         )
         self.firefox_cookie_cb.pack(side="left", padx=(0, 15))
@@ -158,25 +178,44 @@ class SafeDownloaderGUI(ctk.CTk):
         self.embed_thumb_var = ctk.BooleanVar(value=saved_embed_thumb)
         self.embed_thumb_cb = ctk.CTkCheckBox(
             cb_frame, text="サムネイルを埋め込む (--embed-thumbnail)",
+            font=ctk.CTkFont(family=self.current_font_family, size=12),
             variable=self.embed_thumb_var
         )
         self.embed_thumb_cb.pack(side="left")
 
-        # フォーマット指定＆最大バイト数
+        # フォーマット指定＆最大バイト数＆フォールバックフォント切替
         fmt_frame = ctk.CTkFrame(opts_frame, fg_color="transparent")
         fmt_frame.pack(fill="x", pady=3)
 
-        ctk.CTkLabel(fmt_frame, text="画質・フォーマット:").pack(side="left", padx=(0, 5))
-        self.format_entry = ctk.CTkEntry(fmt_frame)
+        self.fmt_label = ctk.CTkLabel(fmt_frame, text="画質・フォーマット:", font=ctk.CTkFont(family=self.current_font_family, size=12))
+        self.fmt_label.pack(side="left", padx=(0, 5))
+
+        self.format_entry = ctk.CTkEntry(fmt_frame, font=ctk.CTkFont(family=self.current_font_family, size=12))
         saved_fmt = self.config.get("format_spec", PathSafeDownloader.DEFAULT_FORMAT_SPEC)
         self.format_entry.insert(0, saved_fmt)
         self.format_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
-        ctk.CTkLabel(fmt_frame, text="最大パスバイト:").pack(side="left", padx=(0, 5))
-        self.max_bytes_entry = ctk.CTkEntry(fmt_frame, width=60)
+        self.max_bytes_label = ctk.CTkLabel(fmt_frame, text="最大パスバイト:", font=ctk.CTkFont(family=self.current_font_family, size=12))
+        self.max_bytes_label.pack(side="left", padx=(0, 5))
+
+        self.max_bytes_entry = ctk.CTkEntry(fmt_frame, width=50, font=ctk.CTkFont(family=self.current_font_family, size=12))
         saved_max_bytes = str(self.config.get("max_path_bytes", "240"))
         self.max_bytes_entry.insert(0, saved_max_bytes)
-        self.max_bytes_entry.pack(side="left")
+        self.max_bytes_entry.pack(side="left", padx=(0, 10))
+
+        # フォント切替ドロップダウン
+        self.font_label = ctk.CTkLabel(fmt_frame, text="フォント:", font=ctk.CTkFont(family=self.current_font_family, size=12))
+        self.font_label.pack(side="left", padx=(0, 5))
+
+        self.font_option_menu = ctk.CTkOptionMenu(
+            fmt_frame,
+            values=AVAILABLE_FONTS,
+            width=130,
+            font=ctk.CTkFont(family=self.current_font_family, size=12),
+            command=self._on_font_selected
+        )
+        self.font_option_menu.set(self.current_font_family)
+        self.font_option_menu.pack(side="left")
 
         # 4. ボタンエリア
         btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -185,6 +224,7 @@ class SafeDownloaderGUI(ctk.CTk):
         self.preview_btn = ctk.CTkButton(
             btn_frame, text="事前プレビュー (確認)",
             fg_color="#3B82F6", hover_color="#2563EB",
+            font=ctk.CTkFont(family=self.current_font_family, size=13, weight="bold"),
             command=self.start_preview
         )
         self.preview_btn.pack(side="left", padx=5, expand=True, fill="x")
@@ -192,26 +232,58 @@ class SafeDownloaderGUI(ctk.CTk):
         self.download_btn = ctk.CTkButton(
             btn_frame, text="一括ダウンロード開始",
             fg_color="#10B981", hover_color="#059669",
+            font=ctk.CTkFont(family=self.current_font_family, size=13, weight="bold"),
             command=self.start_download
         )
         self.download_btn.pack(side="right", padx=5, expand=True, fill="x")
 
         # 5. 情報プレビュー表示エリア
-        self.info_box = ctk.CTkTextbox(self.main_frame, height=130, font=ctk.CTkFont(family="Consolas", size=12))
+        self.info_box = ctk.CTkTextbox(self.main_frame, height=130, font=ctk.CTkFont(family=self.current_font_family, size=12))
         self.info_box.pack(padx=20, pady=5, fill="both", expand=True)
-        self.info_box.insert("1.0", "【機能概要】\n・起動時に yt-dlp の最新版への自動アップデートチェックを実施\n・改行区切りで複数URLをまとめて一括順次ダウンロード可能\n・前回使用した保存先フォルダや設定を自動記憶・復元")
+        self.info_box.insert("1.0", "【機能概要】\n・起動時に yt-dlp の最新版への自動アップデートチェックを実施\n・改行区切りで複数URLをまとめて一括順次ダウンロード可能\n・フォント切替や前回の保存先・設定を自動記憶")
         self.info_box.configure(state="disabled")
 
         # 6. 進捗表示
         progress_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         progress_frame.pack(padx=20, pady=(5, 15), fill="x")
 
-        self.status_label = ctk.CTkLabel(progress_frame, text="yt-dlp の更新チェック中...", anchor="w")
+        self.status_label = ctk.CTkLabel(progress_frame, text="yt-dlp の更新チェック中...", font=ctk.CTkFont(family=self.current_font_family, size=12), anchor="w")
         self.status_label.pack(fill="x", pady=2)
 
         self.progress_bar = ctk.CTkProgressBar(progress_frame)
         self.progress_bar.set(0)
         self.progress_bar.pack(fill="x", pady=2)
+
+    # --- フォント一括適用処理 ---
+    def _on_font_selected(self, selected_font: str):
+        """フォント選択ドロップダウン変更時のイベント"""
+        self.current_font_family = selected_font
+        self._apply_font_family(selected_font)
+        self._save_config()
+
+    def _apply_font_family(self, font_family: str):
+        """指定されたフォントファミリを全ウィジェットへ即時適用"""
+        try:
+            self.title_label.configure(font=ctk.CTkFont(family=font_family, size=20, weight="bold"))
+            self.url_label.configure(font=ctk.CTkFont(family=font_family, weight="bold"))
+            self.url_textbox.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.dir_label.configure(font=ctk.CTkFont(family=font_family, weight="bold"))
+            self.dir_entry.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.dir_browse_btn.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.firefox_cookie_cb.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.embed_thumb_cb.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.fmt_label.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.format_entry.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.max_bytes_label.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.max_bytes_entry.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.font_label.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.font_option_menu.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.preview_btn.configure(font=ctk.CTkFont(family=font_family, size=13, weight="bold"))
+            self.download_btn.configure(font=ctk.CTkFont(family=font_family, size=13, weight="bold"))
+            self.info_box.configure(font=ctk.CTkFont(family=font_family, size=12))
+            self.status_label.configure(font=ctk.CTkFont(family=font_family, size=12))
+        except Exception as e:
+            print(f"フォント適用中の例外: {e}")
 
     # --- プレースホルダー制御 ---
     def _show_placeholder(self):
@@ -279,6 +351,7 @@ class SafeDownloaderGUI(ctk.CTk):
         self.embed_thumb_cb.configure(state=state)
         self.format_entry.configure(state=state)
         self.max_bytes_entry.configure(state=state)
+        self.font_option_menu.configure(state=state)
         self.preview_btn.configure(state=state)
         self.download_btn.configure(state=state)
 
