@@ -328,6 +328,7 @@ class PathSafeDownloader:
             "format": self.format_spec,
             "merge_output_format": "mp4",
             "nocheckcertificate": True,
+            "remote_components": ["ejs:github"],
         }
 
         if self.use_firefox_cookies:
@@ -355,6 +356,7 @@ class PathSafeDownloader:
             "skip_download": True,
             "extract_flat": False,
             "nocheckcertificate": True,
+            "remote_components": ["ejs:github"],
         }
 
         if self.use_firefox_cookies:
@@ -451,8 +453,16 @@ class PathSafeDownloader:
                 logger.warning("クッキーによるブロックまたはフォーマットエラーを検出しました。クッキーなしで再試行します...")
                 ydl_opts.pop("cookiesfrombrowser", None)
                 ydl_opts["format"] = "bestvideo+bestaudio/best"
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([url])
+                except Exception as fallback_e:
+                    fallback_err_str = str(fallback_e)
+                    if "video is not available" in fallback_err_str or "LOGIN_REQUIRED" in fallback_err_str or "Sign in" in fallback_err_str:
+                        logger.error("【エラー】この動画は年齢制限やメンバーシップ等のためログイン(クッキー)が必須ですが、YouTubeのbot対策によりクッキーを使用できませんでした。Node.jsまたはDenoをPCにインストールすると解決する可能性があります。")
+                        raise ValueError("動画のダウンロードにログインが必須ですが、bot対策によりブロックされました。Node.jsまたはDenoをインストールして再度お試しください。")
+                    else:
+                        raise fallback_e
             else:
                 raise e
 
