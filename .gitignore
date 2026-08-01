@@ -1,0 +1,19 @@
+# Python byte-compiled / cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# User local downloads folder
+downloads/
+
+# Local personal config file (auto-generated on app launch)
+config.json
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# OS generated files
+.DS_Store
+Thumbs.db
