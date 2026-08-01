@@ -1,7 +1,6 @@
 """
 yt-dlp Safe Downloader GUI Application
 CustomTkinter を使用した見栄えの良いデスクトップ GUI フロントエンド。
-起動時 yt-dlp 自動更新チェック機能、表示フォントのリアルタイム切替＆保存機能付き。
 """
 
 import os
@@ -71,7 +70,12 @@ class SafeDownloaderGUI(ctk.CTk):
         if os.path.exists(CONFIG_FILE_PATH):
             try:
                 with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                    cfg = json.load(f)
+                    # 古い硬いフォーマット設定が残っている場合は強制的に最新の柔軟な指定に更新
+                    old_fmt = cfg.get("format_spec", "")
+                    if "bestvideo[ext=mp4]" in old_fmt or not old_fmt:
+                        cfg["format_spec"] = PathSafeDownloader.DEFAULT_FORMAT_SPEC
+                    return cfg
             except Exception as e:
                 print(f"設定ファイルの読み込み失敗: {e}")
         return {"output_dir": os.path.abspath("./downloads"), "font_family": "Yu Gothic UI"}
@@ -192,7 +196,7 @@ class SafeDownloaderGUI(ctk.CTk):
 
         self.format_entry = ctk.CTkEntry(fmt_frame, font=ctk.CTkFont(family=self.current_font_family, size=12))
         saved_fmt = self.config.get("format_spec", PathSafeDownloader.DEFAULT_FORMAT_SPEC)
-        if saved_fmt == "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best":
+        if "bestvideo[ext=mp4]" in saved_fmt or not saved_fmt:
             saved_fmt = PathSafeDownloader.DEFAULT_FORMAT_SPEC
 
         self.format_entry.insert(0, saved_fmt)

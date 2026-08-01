@@ -78,8 +78,8 @@ class PathSafeDownloader:
         "instagram": ["instagram"]
     }
 
-    # 柔軟で互換性の高い標準フォーマット指定 (無ければ自動で代替最高画質+音声を取得しMP4へ結合)
-    DEFAULT_FORMAT_SPEC = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best"
+    # 標準フォーマット指定 (最高の映像と音声を自動取得しMP4へ無劣化結合)
+    DEFAULT_FORMAT_SPEC = "bestvideo+bestaudio/best"
 
     def __init__(
         self,
