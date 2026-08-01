@@ -92,16 +92,6 @@ class PathSafeDownloader:
         embed_thumbnail: bool = True,
         history_file_path: Optional[str] = None
     ):
-        """
-        :param output_dir: 保存先ディレクトリパス
-        :param max_path_bytes: フルパスでの UTF-8 最大許容バイト数 (安全基準: 240前後)
-        :param title_ratio: タイトルと投稿者名の割り振りが可能な場合のタイトルの配分比率
-        :param ellipsis: 省略記号 ("…" 等)
-        :param use_firefox_cookies: --cookies-from-browser firefox を使用するか
-        :param format_spec: yt-dlp のフォーマット指定文字列
-        :param embed_thumbnail: サムネイルを動画に埋め込むか (--embed-thumbnail)
-        :param history_file_path: 履歴ファイルの保存パス (省略時はアプリ本体フォルダ直下の download_history.json)
-        """
         self.output_dir = os.path.abspath(output_dir)
         self.max_path_bytes = max_path_bytes
         self.title_ratio = max(0.0, min(1.0, title_ratio))
@@ -355,14 +345,21 @@ class PathSafeDownloader:
         return opts
 
     def fetch_info(self, url: str, extra_ydl_opts: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """動画メタデータの事前取得"""
-        ydl_opts = self._build_base_ydl_opts()
-        ydl_opts.update({
+        """
+        動画メタデータの事前取得。
+        process=False を指定することで Format 選定エラーを完全に回避。
+        """
+        ydl_opts = {
             "quiet": True,
             "no_warnings": True,
             "skip_download": True,
             "extract_flat": False,
-        })
+            "nocheckcertificate": True,
+        }
+
+        if self.use_firefox_cookies:
+            ydl_opts["cookiesfrombrowser"] = ("firefox",)
+
         if extra_ydl_opts:
             ydl_opts.update(extra_ydl_opts)
 
@@ -370,13 +367,13 @@ class PathSafeDownloader:
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(url, download=False, process=False)
         except Exception as e:
             if self.use_firefox_cookies and "cookies" in str(e).lower():
                 logger.warning("Firefoxのクッキー取得に失敗しました。クッキーなしで再試行します...")
                 ydl_opts.pop("cookiesfrombrowser", None)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    info = ydl.extract_info(url, download=False)
+                    info = ydl.extract_info(url, download=False, process=False)
             else:
                 raise e
 
@@ -448,9 +445,12 @@ class PathSafeDownloader:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
         except Exception as e:
-            if self.use_firefox_cookies and "cookies" in str(e).lower():
-                logger.warning("Firefoxクッキーでエラーが発生したため、クッキーなしで再試行します...")
+            err_str = str(e)
+            # クッキーによる YouTube ブロック、またはフォーマットエラー発生時はクッキーなしで自動再試行
+            if self.use_firefox_cookies and ("format is not available" in err_str or "cookies" in err_str.lower() or "images are available" in err_str.lower()):
+                logger.warning("クッキーによるブロックまたはフォーマットエラーを検出しました。クッキーなしで再試行します...")
                 ydl_opts.pop("cookiesfrombrowser", None)
+                ydl_opts["format"] = "bestvideo+bestaudio/best"
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([url])
             else:
