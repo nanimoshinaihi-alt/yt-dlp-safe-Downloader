@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import json
+import time
 import logging
 import subprocess
 from datetime import datetime
@@ -329,6 +330,10 @@ class PathSafeDownloader:
             "merge_output_format": "mp4",
             "nocheckcertificate": True,
             "remote_components": ["ejs:github"],
+            "retries": 15,
+            "fragment_retries": 15,
+            "file_access_retries": 15,
+            "http_chunk_size": 10485760, # 10MB単位で取得し、Bilibili等の切断エラーを防止
         }
 
         if self.use_firefox_cookies:
@@ -443,27 +448,41 @@ class PathSafeDownloader:
             ydl_opts.update(extra_ydl_opts)
 
         logger.info("本番ダウンロードを開始します...")
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-        except Exception as e:
-            err_str = str(e)
-            # クッキーによる YouTube ブロック、またはフォーマットエラー発生時はクッキーなしで自動再試行
-            if self.use_firefox_cookies and ("format is not available" in err_str or "cookies" in err_str.lower() or "images are available" in err_str.lower()):
-                logger.warning("クッキーによるブロックまたはフォーマットエラーを検出しました。クッキーなしで再試行します...")
-                ydl_opts.pop("cookiesfrombrowser", None)
-                ydl_opts["format"] = "bestvideo+bestaudio/best"
-                try:
-                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        ydl.download([url])
-                except Exception as fallback_e:
-                    fallback_err_str = str(fallback_e)
-                    if "video is not available" in fallback_err_str or "LOGIN_REQUIRED" in fallback_err_str or "Sign in" in fallback_err_str:
+        
+        max_resume_retries = 5
+        resume_count = 0
+        
+        while True:
+            try:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                break  # 成功したらループを抜ける
+            except Exception as e:
+                err_str = str(e)
+                
+                # 1. ネットワーク切断による中断エラーの検知 (Bilibili等で発生)
+                if ("bytes read" in err_str and "more expected" in err_str) or "IncompleteRead" in err_str or "Connection reset" in err_str or "10054" in err_str or "タイムアウト" in err_str:
+                    if resume_count < max_resume_retries:
+                        resume_count += 1
+                        logger.warning(f"ネットワーク切断を検知しました。自動レジューム(再開)を試みます... ({resume_count}/{max_resume_retries})")
+                        time.sleep(3)
+                        continue
+                    else:
+                        raise ValueError(f"ネットワーク切断が多発したためダウンロードを中断しました。({max_resume_retries}回再試行失敗)")
+                
+                # 2. クッキーによる YouTube ブロック検知時の自動フォールバック
+                if self.use_firefox_cookies and "cookiesfrombrowser" in ydl_opts and ("format is not available" in err_str or "cookies" in err_str.lower() or "images are available" in err_str.lower()):
+                    logger.warning("クッキーによるブロックまたはフォーマットエラーを検出しました。クッキーなしで再試行します...")
+                    ydl_opts.pop("cookiesfrombrowser", None)
+                    ydl_opts["format"] = "bestvideo+bestaudio/best"
+                    continue  # クッキーなしの ydl_opts でリトライ
+                
+                # 3. フォールバック(クッキーなし)で LOGIN_REQUIRED になった場合の親切なエラーメッセージ
+                if "video is not available" in err_str or "LOGIN_REQUIRED" in err_str or "Sign in" in err_str:
+                    if self.use_firefox_cookies and "cookiesfrombrowser" not in ydl_opts:
                         logger.error("【エラー】この動画は年齢制限やメンバーシップ等のためログイン(クッキー)が必須ですが、YouTubeのbot対策によりクッキーを使用できませんでした。Node.jsまたはDenoをPCにインストールすると解決する可能性があります。")
                         raise ValueError("動画のダウンロードにログインが必須ですが、bot対策によりブロックされました。Node.jsまたはDenoをインストールして再度お試しください。")
-                    else:
-                        raise fallback_e
-            else:
+                
                 raise e
 
         # 4. 履歴登録
