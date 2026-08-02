@@ -8,6 +8,7 @@ import sys
 import json
 import threading
 import subprocess
+import tkinter as tk
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
@@ -140,6 +141,7 @@ class SafeDownloaderGUI(ctk.CTk):
         self._show_placeholder()
         self.url_textbox.bind("<FocusIn>", self._on_focus_in)
         self.url_textbox.bind("<FocusOut>", self._on_focus_out)
+        self._add_context_menu(self.url_textbox)
 
         # 2. 保存先フォルダ設定エリア
         dir_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -154,6 +156,7 @@ class SafeDownloaderGUI(ctk.CTk):
         self.dir_entry = ctk.CTkEntry(dir_input_frame, font=ctk.CTkFont(family=self.current_font_family, size=12))
         self.dir_entry.insert(0, self.output_dir)
         self.dir_entry.pack(side="left", fill="x", expand=True, padx=(0, 5))
+        self._add_context_menu(self.dir_entry)
 
         self.dir_browse_btn = ctk.CTkButton(
             dir_input_frame, text="参照...", width=80,
@@ -201,6 +204,7 @@ class SafeDownloaderGUI(ctk.CTk):
 
         self.format_entry.insert(0, saved_fmt)
         self.format_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self._add_context_menu(self.format_entry)
 
         self.max_bytes_label = ctk.CTkLabel(fmt_frame, text="最大パスバイト:", font=ctk.CTkFont(family=self.current_font_family, size=12))
         self.max_bytes_label.pack(side="left", padx=(0, 5))
@@ -209,6 +213,7 @@ class SafeDownloaderGUI(ctk.CTk):
         saved_max_bytes = str(self.config.get("max_path_bytes", "240"))
         self.max_bytes_entry.insert(0, saved_max_bytes)
         self.max_bytes_entry.pack(side="left", padx=(0, 10))
+        self._add_context_menu(self.max_bytes_entry)
 
         # フォント切替ドロップダウン
         self.font_label = ctk.CTkLabel(fmt_frame, text="フォント:", font=ctk.CTkFont(family=self.current_font_family, size=12))
@@ -260,6 +265,34 @@ class SafeDownloaderGUI(ctk.CTk):
         self.progress_bar = ctk.CTkProgressBar(progress_frame)
         self.progress_bar.set(0)
         self.progress_bar.pack(fill="x", pady=2)
+
+    def _add_context_menu(self, widget):
+        """右クリックメニュー (切り取り/コピー/貼り付けなど) を追加"""
+        menu = tk.Menu(widget, tearoff=0, font=("Yu Gothic UI", 10))
+        
+        # CustomTkinterは内部に標準Tkinterウィジェットを持つため、そちらを対象にする
+        target_widget = widget
+        if hasattr(widget, "_textbox"):
+            target_widget = widget._textbox
+        elif hasattr(widget, "_entry"):
+            target_widget = widget._entry
+            
+        menu.add_command(label="切り取り", command=lambda: target_widget.event_generate("<<Cut>>"))
+        menu.add_command(label="コピー", command=lambda: target_widget.event_generate("<<Copy>>"))
+        menu.add_command(label="貼り付け", command=lambda: target_widget.event_generate("<<Paste>>"))
+        menu.add_separator()
+        menu.add_command(label="すべて選択", command=lambda: target_widget.event_generate("<<SelectAll>>"))
+        
+        def show_menu(event):
+            try:
+                # 読み取り専用状態でなければ表示
+                if widget.cget("state") != "disabled":
+                    menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+                
+        widget.bind("<Button-3>", show_menu)
+        target_widget.bind("<Button-3>", show_menu)
 
     # --- フォント一括適用処理 ---
     def _on_font_selected(self, selected_font: str):
