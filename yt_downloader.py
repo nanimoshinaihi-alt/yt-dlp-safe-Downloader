@@ -327,7 +327,7 @@ class PathSafeDownloader:
         """基本オプション構築"""
         opts = {
             "format": self.format_spec,
-            "format_sort": ["res", "fps", "size", "br", "tbr"], # 物理ファイルサイズを自称ビットレートより優先
+            "format_sort": ["hasvid", "lang", "quality", "res", "fps", "size", "br", "tbr"], # 音声言語(オリジナル優先)・物理サイズを自称ビットレートより優先
             "merge_output_format": "mp4",
             "nocheckcertificate": True,
             "remote_components": ["ejs:github"],
