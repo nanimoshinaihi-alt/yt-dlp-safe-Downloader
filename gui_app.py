@@ -143,6 +143,8 @@ class SafeDownloaderGUI(ctk.CTk):
         self._show_placeholder()
         self.url_textbox.bind("<FocusIn>",  self._on_focus_in)
         self.url_textbox.bind("<FocusOut>", self._on_focus_out)
+        self.url_textbox._textbox.bind("<<Paste>>", self._on_paste)
+        self.url_textbox._textbox.bind("<Control-v>", self._on_paste)
         self._add_context_menu(self.url_textbox)
 
         # 2. 保存先フォルダ設定エリア
@@ -400,6 +402,23 @@ class SafeDownloaderGUI(ctk.CTk):
     def _on_focus_out(self, event=None):
         if not self.url_textbox.get("1.0", "end").strip():
             self._show_placeholder()
+
+    def _on_paste(self, event=None):
+        """URL入力欄へのペースト時、自動で改行を挿入する"""
+        try:
+            clipboard = self.url_textbox.clipboard_get()
+            if clipboard:
+                if self.is_placeholder_active:
+                    self._hide_placeholder()
+                
+                text_to_insert = clipboard.strip()
+                if text_to_insert:
+                    self.url_textbox.insert("insert", text_to_insert + "\n")
+                    self.url_textbox.see("insert")
+                
+                return "break"  # デフォルトのペースト処理をキャンセル
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ #
     #  入力・UI ユーティリティ                                             #
