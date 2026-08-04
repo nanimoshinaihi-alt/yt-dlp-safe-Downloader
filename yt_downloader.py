@@ -53,6 +53,26 @@ def update_yt_dlp(status_callback: Optional[Callable[[str], None]] = None) -> bo
         return False
 
 
+class YTDlpErrorCaptureLogger:
+    """yt-dlp 内部のエラーメッセージをキャプチャしつつ、ignoreerrors 時の握りつぶしを防ぐカスタムロガー"""
+    def __init__(self, fallback_logger: logging.Logger):
+        self.errors = []
+        self.fallback = fallback_logger
+
+    def debug(self, msg: str):
+        pass  # コンソールスパム防止
+
+    def info(self, msg: str):
+        pass  # コンソールスパム防止
+
+    def warning(self, msg: str):
+        self.fallback.warning(msg)
+
+    def error(self, msg: str):
+        self.errors.append(msg)
+        self.fallback.error(msg)
+
+
 class PathSafeDownloader:
     """
     パス長制限 (MAX_PATH / UTF-8 バイト数制限) 回避対応 yt-dlp ダウンローダー
@@ -221,7 +241,6 @@ class PathSafeDownloader:
             suffix = f" ({counter})" if counter > 0 else ""
             prefix = f"{clean_site} - {clean_date} - " if clean_site else f"{clean_date} - "
 
-            # 固定部 (ディレクトリ + prefix + " - " + suffix + ".ext") のバイト数を正確に計算
             dir_bytes   = len(self.output_dir.encode("utf-8"))
             sep_bytes   = len(os.sep.encode("utf-8"))
             fixed_bytes = (
@@ -338,7 +357,8 @@ class PathSafeDownloader:
             "format_sort":         self.DEFAULT_FORMAT_SORT,
             "merge_output_format": "mp4",
             "nocheckcertificate":  True,
-            "ignore_no_formats_error": True, # 画像のみの投稿やカルーセルでの動画フォーマット未検出エラーを無視する
+            "ignore_no_formats_error": True, # メタデータ抽出時の画像エラー無視用
+            "ignoreerrors":        True,     # ダウンロード時のカルーセル途中エラー(画像)での停止を防ぐ
             "remote_components":   ["ejs:github"],
             "retries":             15,
             "fragment_retries":    15,
@@ -362,7 +382,8 @@ class PathSafeDownloader:
             "skip_download":      True,
             "extract_flat":       False,
             "nocheckcertificate": True,
-            "ignore_no_formats_error": True, # メタデータ抽出時も画像エラーを無視
+            "ignore_no_formats_error": True,
+            "ignoreerrors":       True,
             "remote_components":  ["ejs:github"],
         }
         if self.use_firefox_cookies:
@@ -422,7 +443,10 @@ class PathSafeDownloader:
         if info is None:
             raise ValueError("動画情報の取得に失敗しました。")
         if "entries" in info and info["entries"]:
-            info = info["entries"][0]
+            # 最初に見つかった有効なエントリを返す (画像エラーはNoneになるため弾く)
+            valid_entries = [e for e in info["entries"] if e is not None]
+            if valid_entries:
+                info = valid_entries[0]
 
         return info
 
@@ -479,10 +503,28 @@ class PathSafeDownloader:
         cookie_fallback_done = False
 
         while True:
+            # 毎回新しいエラーキャプチャロガーをセット
+            capture_logger = YTDlpErrorCaptureLogger(logger)
+            ydl_opts["logger"] = capture_logger
+
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([url])
-                break
+
+                # ignoreerrors=True の場合、例外は握りつぶされるため、キャプチャしたエラーを走査して自前で判定する
+                for err_str in capture_logger.errors:
+                    # 無視すべきエラー (Instagram等の静止画エラー)
+                    if "No video formats found" in err_str:
+                        continue
+                    
+                    # 致命的エラーの場合は再スローして以下の except ブロックに処理させる
+                    if self._is_network_drop(err_str) or self._is_cookie_block(err_str) or self._is_login_required(err_str):
+                        raise ValueError(err_str)
+                    
+                    # その他の不明なエラーは念のためログに残すが続行 (プレイリストの1つが死んだだけかもしれないため)
+                    logger.warning(f"マイナーエラーを検知しましたが続行します: {err_str}")
+
+                break  # 成功
 
             except Exception as e:
                 err_str = str(e)
