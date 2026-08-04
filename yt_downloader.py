@@ -455,7 +455,10 @@ class PathSafeDownloader:
 
         # upload_date が欠落している場合、timestamp から補完する
         if not info.get("upload_date") and info.get("timestamp"):
-            info["upload_date"] = datetime.fromtimestamp(info["timestamp"]).strftime("%Y%m%d")
+            try:
+                info["upload_date"] = datetime.fromtimestamp(float(info["timestamp"])).strftime("%Y%m%d")
+            except Exception as e:
+                logger.warning(f"タイムスタンプのパースに失敗しました: {e}")
 
         return info
 
