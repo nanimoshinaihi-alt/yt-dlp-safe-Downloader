@@ -338,6 +338,7 @@ class PathSafeDownloader:
             "format_sort":         self.DEFAULT_FORMAT_SORT,
             "merge_output_format": "mp4",
             "nocheckcertificate":  True,
+            "ignore_no_formats_error": True, # 画像のみの投稿やカルーセルでの動画フォーマット未検出エラーを無視する
             "remote_components":   ["ejs:github"],
             "retries":             15,
             "fragment_retries":    15,
@@ -361,6 +362,7 @@ class PathSafeDownloader:
             "skip_download":      True,
             "extract_flat":       False,
             "nocheckcertificate": True,
+            "ignore_no_formats_error": True, # メタデータ抽出時も画像エラーを無視
             "remote_components":  ["ejs:github"],
         }
         if self.use_firefox_cookies:
