@@ -446,7 +446,16 @@ class PathSafeDownloader:
             # 最初に見つかった有効なエントリを返す (画像エラーはNoneになるため弾く)
             valid_entries = [e for e in info["entries"] if e is not None]
             if valid_entries:
-                info = valid_entries[0]
+                first_entry = valid_entries[0]
+                # 親プレイリストのメタデータを引き継ぐ (存在しない場合のみ)
+                for key in ["upload_date", "timestamp", "uploader", "uploader_id", "channel", "title"]:
+                    if not first_entry.get(key) and info.get(key):
+                        first_entry[key] = info[key]
+                info = first_entry
+
+        # upload_date が欠落している場合、timestamp から補完する
+        if not info.get("upload_date") and info.get("timestamp"):
+            info["upload_date"] = datetime.fromtimestamp(info["timestamp"]).strftime("%Y%m%d")
 
         return info
 
