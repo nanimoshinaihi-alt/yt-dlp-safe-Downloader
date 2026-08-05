@@ -80,6 +80,8 @@ class SafeDownloaderGUI(ctk.CTk):
                 old_fmt = cfg.get("format_spec", "")
                 if "bestvideo[ext=mp4]" in old_fmt or not old_fmt:
                     cfg["format_spec"] = PathSafeDownloader.DEFAULT_FORMAT_SPEC
+                if "download_playlist" not in cfg:
+                    cfg["download_playlist"] = False
                 return cfg
             except Exception as e:
                 print(f"設定ファイルの読み込み失敗: {e}")
@@ -93,6 +95,7 @@ class SafeDownloaderGUI(ctk.CTk):
             "format_spec":         self.format_entry.get().strip(),
             "use_firefox_cookies": self.firefox_cookie_var.get(),
             "embed_thumbnail":     self.embed_thumb_var.get(),
+            "download_playlist":   self.playlist_var.get(),
             "font_family":         self.font_option_menu.get(),
         }
         try:
@@ -199,6 +202,15 @@ class SafeDownloaderGUI(ctk.CTk):
             variable=self.embed_thumb_var,
         )
         self.embed_thumb_cb.pack(side="left")
+
+        self.playlist_var = ctk.BooleanVar(value=self.config.get("download_playlist", False))
+        self.playlist_cb = ctk.CTkCheckBox(
+            cb_frame,
+            text="合集やリストの全動画を一括DLする (OFF時は単体DL)",
+            variable=self.playlist_var,
+            font=ctk.CTkFont(family=self.current_font_family, size=12),
+        )
+        self.playlist_cb.pack(side="left", padx=(15, 0))
 
         # フォーマット指定・最大バイト数・フォント切替
         fmt_frame = ctk.CTkFrame(opts_frame, fg_color="transparent")
@@ -482,6 +494,7 @@ class SafeDownloaderGUI(ctk.CTk):
             use_firefox_cookies=self.firefox_cookie_var.get(),
             format_spec=fmt,
             embed_thumbnail=self.embed_thumb_var.get(),
+            download_playlist=self.playlist_var.get(),
         )
 
     # ------------------------------------------------------------------ #

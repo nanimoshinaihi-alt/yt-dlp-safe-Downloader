@@ -133,6 +133,7 @@ class PathSafeDownloader:
         use_firefox_cookies: bool = True,
         format_spec: Optional[str] = None,
         embed_thumbnail: bool = True,
+        download_playlist: bool = False,
         history_file_path: Optional[str] = None,
     ):
         self.output_dir          = os.path.abspath(output_dir)
@@ -142,6 +143,7 @@ class PathSafeDownloader:
         self.use_firefox_cookies = use_firefox_cookies
         self.format_spec         = format_spec or self.DEFAULT_FORMAT_SPEC
         self.embed_thumbnail     = embed_thumbnail
+        self.download_playlist   = download_playlist
 
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -357,6 +359,7 @@ class PathSafeDownloader:
             "format_sort":         self.DEFAULT_FORMAT_SORT,
             "merge_output_format": "mp4",
             "nocheckcertificate":  True,
+            "noplaylist":          not self.download_playlist,
             "ignore_no_formats_error": True, # メタデータ抽出時の画像エラー無視用
             "ignoreerrors":        True,     # ダウンロード時のカルーセル途中エラー(画像)での停止を防ぐ
             "remote_components":   ["ejs:github"],
@@ -382,7 +385,8 @@ class PathSafeDownloader:
             "skip_download":      True,
             "extract_flat":       False,
             "nocheckcertificate": True,
-            "ignore_no_formats_error": True,
+            "noplaylist":         not self.download_playlist,
+            "ignore_no_formats_error": True, # メタデータのみ抽出時も動画なし(画像)エラーを無視
             "ignoreerrors":       True,
             "remote_components":  ["ejs:github"],
         }
