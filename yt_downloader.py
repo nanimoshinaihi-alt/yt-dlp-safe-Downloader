@@ -498,7 +498,10 @@ class PathSafeDownloader:
 
         # 3. yt-dlp オプション組み立て
         filename_without_ext = os.path.splitext(safe_filename)[0]
-        outtmpl_path = os.path.join(self.output_dir, f"{filename_without_ext}.%(ext)s")
+        outtmpl_path = os.path.join(
+            self.output_dir,
+            f"{filename_without_ext}%(playlist_index&_P|)s%(playlist_index|)s.%(ext)s"
+        )
 
         ydl_opts = self._build_base_ydl_opts()
         ydl_opts.update({"outtmpl": outtmpl_path, "quiet": False, "no_warnings": False})
