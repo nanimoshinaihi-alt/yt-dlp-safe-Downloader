@@ -644,7 +644,8 @@ class PathSafeDownloader:
             logger.error(f"プレイリスト情報の取得に失敗: {e}")
             return []
 
-        entries = info.get("entries", []) if info else []
+        entries_raw = info.get("entries") if info else []
+        entries = list(entries_raw) if entries_raw else []
         if not entries:
             # エントリがない場合（単体動画の場合）
             return [self._download_single(url, extra_ydl_opts, check_cancel_hook)]
