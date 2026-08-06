@@ -689,14 +689,21 @@ class SafeDownloaderGUI(ctk.CTk):
                 hook       = self._make_progress_hook(idx, total_count)
                 
                 def plist_hook(p_idx, p_total, p_url):
-                    msg = f"--- プレイリスト ({p_idx}/{p_total}) ---\n"
+                    msg = f"\n--- プレイリスト ({p_idx}/{p_total}) ---\n"
                     self.after(0, lambda m=msg: self._log_info(m))
-                    
-                saved_results = self.downloader.download(url, progress_hook=hook, playlist_progress_hook=plist_hook)
-                for saved_path, _ in saved_results:
+
+                def item_hook(saved_path):
+                    nonlocal success_count
                     success_count += 1
                     msg = f"[{idx}/{total_count}] 成功: {os.path.basename(saved_path)}\n"
                     self.after(0, lambda m=msg: self._log_info(m))
+                    
+                saved_results = self.downloader.download(
+                    url, 
+                    progress_hook=hook, 
+                    playlist_progress_hook=plist_hook,
+                    item_completed_hook=item_hook
+                )
             except Exception as e:
                 fail_count += 1
                 msg = f"[{idx}/{total_count}] 失敗: {url}\n  エラー内容: {e}\n"

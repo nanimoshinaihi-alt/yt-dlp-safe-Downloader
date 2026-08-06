@@ -617,6 +617,7 @@ class PathSafeDownloader:
         extra_ydl_opts: Optional[Dict[str, Any]] = None,
         progress_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
         playlist_progress_hook: Optional[Callable[[int, int, str], None]] = None,
+        item_completed_hook: Optional[Callable[[str], None]] = None,
     ) -> List[Tuple[str, Dict[str, Any]]]:
         """
         URLの動画をダウンロードする（プレイリストの場合は展開してループ処理する）
@@ -630,7 +631,10 @@ class PathSafeDownloader:
                 progress_hook(d)
 
         if not self.download_playlist:
-            return [self._download_single(url, extra_ydl_opts, check_cancel_hook)]
+            res = self._download_single(url, extra_ydl_opts, check_cancel_hook)
+            if item_completed_hook:
+                item_completed_hook(res[0])
+            return [res]
 
         # プレイリストのフラット抽出
         opts = self._build_fetch_ydl_opts()
@@ -649,7 +653,10 @@ class PathSafeDownloader:
         entries = list(entries_raw) if entries_raw else []
         if not entries:
             # エントリがない場合（単体動画の場合）
-            return [self._download_single(url, extra_ydl_opts, check_cancel_hook)]
+            res = self._download_single(url, extra_ydl_opts, check_cancel_hook)
+            if item_completed_hook:
+                item_completed_hook(res[0])
+            return [res]
 
         results = []
         for idx, entry in enumerate(entries, 1):
@@ -667,6 +674,8 @@ class PathSafeDownloader:
             try:
                 res = self._download_single(entry_url, extra_ydl_opts, check_cancel_hook)
                 results.append(res)
+                if item_completed_hook:
+                    item_completed_hook(res[0])
             except ValueError as ve:
                 if "キャンセル" in str(ve):
                     logger.warning(str(ve))
