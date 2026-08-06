@@ -92,7 +92,8 @@ class SafeDownloaderGUI(ctk.CTk):
         config_data = {
             "output_dir":          self.dir_entry.get().strip(),
             "max_path_bytes":      self.max_bytes_entry.get().strip(),
-            "format_spec":         self.format_entry.get().strip(),
+            "format_mode":         self.format_option_menu.get(),
+            "custom_format_spec":  self.custom_format_entry.get().strip(),
             "use_firefox_cookies": self.firefox_cookie_var.get(),
             "embed_thumbnail":     self.embed_thumb_var.get(),
             "download_playlist":   self.playlist_var.get(),
@@ -225,16 +226,40 @@ class SafeDownloaderGUI(ctk.CTk):
         )
         self.fmt_label.pack(side="left", padx=(0, 5))
 
-        saved_fmt = self.config.get("format_spec", PathSafeDownloader.DEFAULT_FORMAT_SPEC)
-        if "bestvideo[ext=mp4]" in saved_fmt or not saved_fmt:
-            saved_fmt = PathSafeDownloader.DEFAULT_FORMAT_SPEC
+        inner_fmt_frame = ctk.CTkFrame(fmt_frame, fg_color="transparent")
+        inner_fmt_frame.pack(side="left", fill="x", expand=True, padx=(0, 10))
 
-        self.format_entry = ctk.CTkEntry(
-            fmt_frame, font=ctk.CTkFont(family=self.current_font_family, size=12),
+        saved_mode = self.config.get("format_mode", "最高画質 (MP4優先・推奨)")
+        # 後方互換性: 古い format_spec がある場合の復元ロジック
+        if "format_mode" not in self.config:
+            old_fmt = self.config.get("format_spec", "")
+            if old_fmt == PathSafeDownloader.DEFAULT_FORMAT_SPEC or "bestvideo[ext=mp4]" in old_fmt or not old_fmt:
+                saved_mode = "最高画質 (MP4優先・推奨)"
+            else:
+                saved_mode = "カスタム (直接入力)"
+
+        self.format_option_menu = ctk.CTkOptionMenu(
+            inner_fmt_frame,
+            values=["最高画質 (MP4優先・推奨)", "最高画質 (WebM優先)", "カスタム (直接入力)"],
+            font=ctk.CTkFont(family=self.current_font_family, size=12),
+            command=self._on_format_changed,
         )
-        self.format_entry.insert(0, saved_fmt)
-        self.format_entry.pack(side="left", fill="x", expand=True, padx=(0, 10))
-        self._add_context_menu(self.format_entry)
+        self.format_option_menu.set(saved_mode)
+        self.format_option_menu.pack(side="left")
+
+        saved_custom = self.config.get("custom_format_spec", PathSafeDownloader.DEFAULT_FORMAT_SPEC)
+        # 後方互換性
+        if "custom_format_spec" not in self.config and "format_spec" in self.config:
+            saved_custom = self.config.get("format_spec")
+
+        self.custom_format_entry = ctk.CTkEntry(
+            inner_fmt_frame, font=ctk.CTkFont(family=self.current_font_family, size=12), width=200
+        )
+        self.custom_format_entry.insert(0, saved_custom)
+        self._add_context_menu(self.custom_format_entry)
+
+        if saved_mode == "カスタム (直接入力)":
+            self.custom_format_entry.pack(side="left", fill="x", expand=True, padx=(5, 0))
 
         self.max_bytes_label = ctk.CTkLabel(
             fmt_frame, text="最大パスバイト:",
@@ -471,6 +496,13 @@ class SafeDownloaderGUI(ctk.CTk):
         self.url_textbox.configure(state="normal")
         self._show_placeholder()
 
+    def _on_format_changed(self, choice):
+        """フォーマットのドロップダウン変更時のUI動的切り替え"""
+        if choice == "カスタム (直接入力)":
+            self.custom_format_entry.pack(side="left", fill="x", expand=True, padx=(5, 0))
+        else:
+            self.custom_format_entry.pack_forget()
+
     def _on_cancel_clicked(self):
         """キャンセルボタンが押された時の処理"""
         if hasattr(self, 'downloader') and self.downloader:
@@ -483,7 +515,7 @@ class SafeDownloaderGUI(ctk.CTk):
         for widget in (
             self.url_textbox, self.dir_entry, self.dir_browse_btn,
             self.firefox_cookie_cb, self.embed_thumb_cb, self.playlist_cb,
-            self.format_entry, self.max_bytes_entry,
+            self.format_option_menu, self.custom_format_entry, self.max_bytes_entry,
             self.font_option_menu, self.preview_btn,
         ):
             widget.configure(state=state)
@@ -515,14 +547,14 @@ class SafeDownloaderGUI(ctk.CTk):
             max_b = int(self.max_bytes_entry.get().strip())
         except ValueError:
             max_b = 240
-        fmt = self.format_entry.get().strip() or PathSafeDownloader.DEFAULT_FORMAT_SPEC
 
         return PathSafeDownloader(
             output_dir=out_dir,
             max_path_bytes=max_b,
             title_ratio=0.7,
             use_firefox_cookies=self.firefox_cookie_var.get(),
-            format_spec=fmt,
+            format_mode=self.format_option_menu.get(),
+            custom_format_spec=self.custom_format_entry.get().strip(),
             embed_thumbnail=self.embed_thumb_var.get(),
             download_playlist=self.playlist_var.get(),
         )

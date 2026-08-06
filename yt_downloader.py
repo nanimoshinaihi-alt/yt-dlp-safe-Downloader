@@ -131,7 +131,8 @@ class PathSafeDownloader:
         title_ratio: float = 0.7,
         ellipsis: str = "…",
         use_firefox_cookies: bool = True,
-        format_spec: Optional[str] = None,
+        format_mode: str = "最高画質 (MP4優先・推奨)",
+        custom_format_spec: str = "",
         embed_thumbnail: bool = True,
         download_playlist: bool = False,
         history_file_path: Optional[str] = None,
@@ -141,7 +142,8 @@ class PathSafeDownloader:
         self.title_ratio         = max(0.0, min(1.0, title_ratio))
         self.ellipsis            = ellipsis
         self.use_firefox_cookies = use_firefox_cookies
-        self.format_spec         = format_spec or self.DEFAULT_FORMAT_SPEC
+        self.format_mode         = format_mode
+        self.custom_format_spec  = custom_format_spec
         self.embed_thumbnail     = embed_thumbnail
         self.download_playlist   = download_playlist
         self.cancel_flag         = False
@@ -355,10 +357,21 @@ class PathSafeDownloader:
 
     def _build_base_ydl_opts(self) -> Dict[str, Any]:
         """ダウンロード用の基本オプション構築"""
+        # フォーマットと結合形式の決定
+        if "MP4優先" in self.format_mode:
+            fmt = "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+            merge_fmt = "mp4"
+        elif "WebM優先" in self.format_mode:
+            fmt = "bestvideo[ext=webm]+bestaudio[ext=webm]/best[ext=webm]/best"
+            merge_fmt = "mkv"
+        else:
+            fmt = self.custom_format_spec or self.DEFAULT_FORMAT_SPEC
+            merge_fmt = "mp4"
+
         opts: Dict[str, Any] = {
-            "format":              self.format_spec,
+            "format":              fmt,
             "format_sort":         self.DEFAULT_FORMAT_SORT,
-            "merge_output_format": "mp4",
+            "merge_output_format": merge_fmt,
             "nocheckcertificate":  True,
             "noplaylist":          not self.download_playlist,
             "ignore_no_formats_error": True, # メタデータ抽出時の画像エラー無視用
