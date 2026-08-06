@@ -468,15 +468,42 @@ class SafeDownloaderGUI(ctk.CTk):
         self.url_textbox.configure(state="normal")
         self._show_placeholder()
 
+    def _on_cancel_clicked(self):
+        """キャンセルボタンが押された時の処理"""
+        if hasattr(self, 'downloader') and self.downloader:
+            self.downloader.cancel_download()
+            self.download_btn.configure(text="キャンセル処理中...", state="disabled")
+            self._log_info("\n[キャンセル] ユーザーにより停止信号が送信されました。処理が中断されるまで数秒お待ちください...\n")
+
     def _set_ui_state(self, state: str):
         """処理中の UI 要素の有効化 / 無効化制御"""
         for widget in (
             self.url_textbox, self.dir_entry, self.dir_browse_btn,
-            self.firefox_cookie_cb, self.embed_thumb_cb,
+            self.firefox_cookie_cb, self.embed_thumb_cb, self.playlist_cb,
             self.format_entry, self.max_bytes_entry,
-            self.font_option_menu, self.preview_btn, self.download_btn,
+            self.font_option_menu, self.preview_btn,
         ):
             widget.configure(state=state)
+
+        if state == "disabled":
+            # ダウンロード中: 開始ボタンを停止ボタンに変更
+            self.download_btn.configure(
+                text="🛑 キャンセル (停止)",
+                fg_color="#c0392b",
+                hover_color="#e74c3c",
+                command=self._on_cancel_clicked,
+                state="normal"  # ボタン自体は押せる状態を維持
+            )
+        else:
+            # 完了後: 元のボタンに戻す
+            # ThemeManager のデフォルトまたは適当な青系色に戻す
+            self.download_btn.configure(
+                text="一括ダウンロード開始",
+                fg_color=["#3B8ED0", "#1F6AA5"],
+                hover_color=["#36719F", "#144870"],
+                command=self.start_download,
+                state="normal"
+            )
 
     def _get_downloader(self) -> PathSafeDownloader:
         """現在の UI 設定から PathSafeDownloader インスタンスを生成"""
@@ -611,7 +638,7 @@ class SafeDownloaderGUI(ctk.CTk):
         total_count   = len(urls)
 
         self.after(0, lambda: self._log_info(f"=== 一括ダウンロード開始 (全{total_count}件) ===", clear=True))
-        downloader = self._get_downloader()
+        self.downloader = self._get_downloader()
 
         for idx, url in enumerate(urls, 1):
             self.after(0, lambda i=idx, t=total_count: self.status_label.configure(
@@ -619,10 +646,11 @@ class SafeDownloaderGUI(ctk.CTk):
             ))
             try:
                 hook       = self._make_progress_hook(idx, total_count)
-                saved_path, _ = downloader.download(url, progress_hook=hook)
-                success_count += 1
-                msg = f"[{idx}/{total_count}] 成功: {os.path.basename(saved_path)}\n"
-                self.after(0, lambda m=msg: self._log_info(m))
+                saved_results = self.downloader.download(url, progress_hook=hook)
+                for saved_path, _ in saved_results:
+                    success_count += 1
+                    msg = f"[{idx}/{total_count}] 成功: {os.path.basename(saved_path)}\n"
+                    self.after(0, lambda m=msg: self._log_info(m))
             except Exception as e:
                 fail_count += 1
                 msg = f"[{idx}/{total_count}] 失敗: {url}\n  エラー内容: {e}\n"

@@ -144,6 +144,7 @@ class PathSafeDownloader:
         self.format_spec         = format_spec or self.DEFAULT_FORMAT_SPEC
         self.embed_thumbnail     = embed_thumbnail
         self.download_playlist   = download_playlist
+        self.cancel_flag         = False
 
         os.makedirs(self.output_dir, exist_ok=True)
 
@@ -465,8 +466,12 @@ class PathSafeDownloader:
                 logger.warning(f"タイムスタンプのパースに失敗しました: {e}")
 
         return info
+    def cancel_download(self):
+        """ダウンロードを強制中断するシグナルを送る"""
+        self.cancel_flag = True
+        logger.info("ユーザーによってキャンセル要求が送信されました。")
 
-    def download(
+    def _download_single(
         self,
         url: str,
         extra_ydl_opts: Optional[Dict[str, Any]] = None,
@@ -504,10 +509,11 @@ class PathSafeDownloader:
         filename_without_ext = os.path.splitext(safe_filename)[0]
         outtmpl_path = os.path.join(
             self.output_dir,
-            f"{filename_without_ext}%(playlist_index&_P|)s%(playlist_index|)s.%(ext)s"
+            f"{filename_without_ext}.%(ext)s"
         )
 
         ydl_opts = self._build_base_ydl_opts()
+        ydl_opts["noplaylist"] = True  # 単体ダウンロード時は必ずTrueにする
         ydl_opts.update({"outtmpl": outtmpl_path, "quiet": False, "no_warnings": False})
         if progress_hook:
             ydl_opts["progress_hooks"] = [progress_hook]
@@ -591,3 +597,67 @@ class PathSafeDownloader:
         self.register_download_history(safe_full_path, video_id)
         logger.info(f"ダウンロード完了: {safe_full_path}")
         return safe_full_path, info
+
+    def download(
+        self,
+        url: str,
+        extra_ydl_opts: Optional[Dict[str, Any]] = None,
+        progress_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ) -> List[Tuple[str, Dict[str, Any]]]:
+        """
+        URLの動画をダウンロードする（プレイリストの場合は展開してループ処理する）
+        """
+        self.cancel_flag = False
+
+        def check_cancel_hook(d):
+            if self.cancel_flag:
+                raise ValueError("ユーザーによってキャンセルされました。")
+            if progress_hook:
+                progress_hook(d)
+
+        if not self.download_playlist:
+            return [self._download_single(url, extra_ydl_opts, check_cancel_hook)]
+
+        # プレイリストのフラット抽出
+        opts = self._build_fetch_ydl_opts()
+        opts["extract_flat"] = "in_playlist"
+        opts["noplaylist"] = False
+        
+        logger.info(f"プレイリスト情報を取得中: {url}")
+        try:
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(url, download=False, process=False)
+        except Exception as e:
+            logger.error(f"プレイリスト情報の取得に失敗: {e}")
+            return []
+
+        entries = info.get("entries", []) if info else []
+        if not entries:
+            # エントリがない場合（単体動画の場合）
+            return [self._download_single(url, extra_ydl_opts, check_cancel_hook)]
+
+        results = []
+        for idx, entry in enumerate(entries, 1):
+            if self.cancel_flag:
+                logger.warning("キャンセルされたため、プレイリスト以降のダウンロードを中止します。")
+                break
+            
+            entry_url = entry.get("url") or entry.get("webpage_url")
+            if not entry_url:
+                continue
+            
+            logger.info(f"--- プレイリスト ({idx}/{len(entries)}) ---")
+            try:
+                res = self._download_single(entry_url, extra_ydl_opts, check_cancel_hook)
+                results.append(res)
+            except ValueError as ve:
+                if "キャンセル" in str(ve):
+                    logger.warning(str(ve))
+                    break
+                logger.error(f"ダウンロードに失敗しました: {ve}")
+            except Exception as e:
+                if self.cancel_flag:
+                    break
+                logger.error(f"プレイリスト内アイテムのダウンロードに失敗しました: {e}")
+
+        return results
