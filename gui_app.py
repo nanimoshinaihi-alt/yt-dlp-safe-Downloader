@@ -76,10 +76,15 @@ class SafeDownloaderGUI(ctk.CTk):
             try:
                 with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
-                # 古い硬いフォーマット指定が残っている場合は最新の柔軟な指定に更新
-                old_fmt = cfg.get("format_spec", "")
-                if "bestvideo[ext=mp4]" in old_fmt or not old_fmt:
-                    cfg["format_spec"] = PathSafeDownloader.DEFAULT_FORMAT_SPEC
+                # --- 後方互換性マイグレーション ---
+                # 古い format_spec → format_mode / custom_format_spec に変換
+                if "format_mode" not in cfg:
+                    old_fmt = cfg.get("format_spec", "")
+                    if not old_fmt or "bestvideo[ext=mp4]" in old_fmt or old_fmt == PathSafeDownloader.DEFAULT_FORMAT_SPEC:
+                        cfg["format_mode"] = "最高画質 (MP4優先・推奨)"
+                    else:
+                        cfg["format_mode"] = "カスタム (直接入力)"
+                        cfg["custom_format_spec"] = old_fmt
                 if "download_playlist" not in cfg:
                     cfg["download_playlist"] = False
                 return cfg
@@ -120,21 +125,10 @@ class SafeDownloaderGUI(ctk.CTk):
         self.firefox_cookie_var = ctk.BooleanVar(value=self.config.get("use_firefox_cookies", True))
         self.embed_thumb_var = ctk.BooleanVar(value=self.config.get("embed_thumbnail", True))
         self.playlist_var = ctk.BooleanVar(value=self.config.get("download_playlist", False))
-        
-        saved_mode = self.config.get("format_mode", "最高画質 (MP4優先・推奨)")
-        if "format_mode" not in self.config:
-            old_fmt = self.config.get("format_spec", "")
-            if old_fmt == PathSafeDownloader.DEFAULT_FORMAT_SPEC or "bestvideo[ext=mp4]" in old_fmt or not old_fmt:
-                saved_mode = "最高画質 (MP4優先・推奨)"
-            else:
-                saved_mode = "カスタム (直接入力)"
-        self.format_mode_var = ctk.StringVar(value=saved_mode)
-        
-        saved_custom = self.config.get("custom_format_spec", PathSafeDownloader.DEFAULT_FORMAT_SPEC)
-        if "custom_format_spec" not in self.config and "format_spec" in self.config:
-            saved_custom = self.config.get("format_spec")
-        self.custom_format_var = ctk.StringVar(value=saved_custom)
-        
+
+        # format_mode は _load_config でマイグレーション済みなので直接取得
+        self.format_mode_var = ctk.StringVar(value=self.config.get("format_mode", "最高画質 (MP4優先・推奨)"))
+        self.custom_format_var = ctk.StringVar(value=self.config.get("custom_format_spec", PathSafeDownloader.DEFAULT_FORMAT_SPEC))
         self.max_bytes_var = ctk.StringVar(value=str(self.config.get("max_path_bytes", "240")))
         self.font_family_var = ctk.StringVar(value=self.current_font_family)
 
@@ -315,37 +309,47 @@ class SafeDownloaderGUI(ctk.CTk):
         self._save_config()
 
     def _apply_font_family(self, font_family: str):
-        """指定されたフォントファミリを全ウィジェットへ即時適用"""
-        try:
-            bold   = ctk.CTkFont(family=font_family, weight="bold")
-            normal = ctk.CTkFont(family=font_family, size=12)
-            large  = ctk.CTkFont(family=font_family, size=20, weight="bold")
-            btn    = ctk.CTkFont(family=font_family, size=13, weight="bold")
+        """指定されたフォントファミリをメイン画面の全ウィジェットへ即時適用"""
+        bold   = ctk.CTkFont(family=font_family, weight="bold")
+        normal = ctk.CTkFont(family=font_family, size=12)
+        large  = ctk.CTkFont(family=font_family, size=20, weight="bold")
+        btn    = ctk.CTkFont(family=font_family, size=13, weight="bold")
 
-            widget_fonts = [
-                (self.title_label,        large),
-                (self.url_label,          bold),
-                (self.url_textbox,        normal),
-                (self.dir_label,          bold),
-                (self.dir_entry,          normal),
-                (self.dir_browse_btn,     normal),
-                (self.firefox_cookie_cb,  normal),
-                (self.embed_thumb_cb,     normal),
-                (self.fmt_label,          normal),
-                (self.format_entry,       normal),
-                (self.max_bytes_label,    normal),
-                (self.max_bytes_entry,    normal),
-                (self.font_label,         normal),
-                (self.font_option_menu,   normal),
-                (self.preview_btn,        btn),
-                (self.download_btn,       btn),
-                (self.info_box,           normal),
-                (self.status_label,       normal),
-            ]
-            for widget, font in widget_fonts:
+        # メイン画面のウィジェットのみ（常に存在することが保証されているもの）
+        main_widget_fonts = [
+            (self.title_label,    large),
+            (self.url_label,      bold),
+            (self.url_textbox,    normal),
+            (self.dir_label,      bold),
+            (self.dir_entry,      normal),
+            (self.dir_browse_btn, normal),
+            (self.playlist_cb,    normal),
+            (self.settings_btn,   normal),
+            (self.preview_btn,    btn),
+            (self.download_btn,   btn),
+            (self.info_box,       normal),
+            (self.status_label,   normal),
+        ]
+        for widget, font in main_widget_fonts:
+            try:
                 widget.configure(font=font)
-        except Exception as e:
-            print(f"フォント適用中の例外: {e}")
+            except Exception:
+                pass
+
+        # ポップアップが開いている場合はその中のウィジェットにも適用
+        if self.settings_window and self.settings_window.winfo_exists():
+            popup_widgets = [
+                "firefox_cookie_cb", "embed_thumb_cb",
+                "format_option_menu", "custom_format_entry",
+                "max_bytes_entry", "font_option_menu",
+            ]
+            for name in popup_widgets:
+                widget = getattr(self, name, None)
+                if widget and widget.winfo_exists():
+                    try:
+                        widget.configure(font=normal)
+                    except Exception:
+                        pass
 
     # ------------------------------------------------------------------ #
     #  プレースホルダー制御                                                #
