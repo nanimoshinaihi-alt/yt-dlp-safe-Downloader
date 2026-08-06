@@ -687,7 +687,12 @@ class SafeDownloaderGUI(ctk.CTk):
             ))
             try:
                 hook       = self._make_progress_hook(idx, total_count)
-                saved_results = self.downloader.download(url, progress_hook=hook)
+                
+                def plist_hook(p_idx, p_total, p_url):
+                    msg = f"--- プレイリスト ({p_idx}/{p_total}) ---\n"
+                    self.after(0, lambda m=msg: self._log_info(m))
+                    
+                saved_results = self.downloader.download(url, progress_hook=hook, playlist_progress_hook=plist_hook)
                 for saved_path, _ in saved_results:
                     success_count += 1
                     msg = f"[{idx}/{total_count}] 成功: {os.path.basename(saved_path)}\n"

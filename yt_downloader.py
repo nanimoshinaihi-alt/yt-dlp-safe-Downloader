@@ -616,6 +616,7 @@ class PathSafeDownloader:
         url: str,
         extra_ydl_opts: Optional[Dict[str, Any]] = None,
         progress_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+        playlist_progress_hook: Optional[Callable[[int, int, str], None]] = None,
     ) -> List[Tuple[str, Dict[str, Any]]]:
         """
         URLの動画をダウンロードする（プレイリストの場合は展開してループ処理する）
@@ -660,6 +661,8 @@ class PathSafeDownloader:
             if not entry_url:
                 continue
             
+            if playlist_progress_hook:
+                playlist_progress_hook(idx, len(entries), entry_url)
             logger.info(f"--- プレイリスト ({idx}/{len(entries)}) ---")
             try:
                 res = self._download_single(entry_url, extra_ydl_opts, check_cancel_hook)
