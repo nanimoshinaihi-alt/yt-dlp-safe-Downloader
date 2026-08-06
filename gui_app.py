@@ -550,7 +550,7 @@ class SafeDownloaderGUI(ctk.CTk):
         """現在の UI 設定から PathSafeDownloader インスタンスを生成"""
         out_dir = self.dir_entry.get().strip() or "./downloads"
         try:
-            max_b = int(self.max_bytes_entry.get().strip())
+            max_b = int(self.max_bytes_var.get().strip())
         except ValueError:
             max_b = 240
 
