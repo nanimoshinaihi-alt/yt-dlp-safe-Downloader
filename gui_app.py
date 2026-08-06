@@ -47,7 +47,7 @@ class SafeDownloaderGUI(ctk.CTk):
         super().__init__()
 
         self.title("yt-dlp Safe Downloader")
-        self.geometry("520x680")
+        self.geometry("600x680")
         self.resizable(True, True)
 
         self.is_placeholder_active = False
