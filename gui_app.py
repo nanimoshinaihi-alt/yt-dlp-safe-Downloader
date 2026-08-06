@@ -91,13 +91,13 @@ class SafeDownloaderGUI(ctk.CTk):
         """現在の設定 (保存先ディレクトリ、オプション、フォント等) を config.json へ保存"""
         config_data = {
             "output_dir":          self.dir_entry.get().strip(),
-            "max_path_bytes":      self.max_bytes_entry.get().strip(),
-            "format_mode":         self.format_option_menu.get(),
-            "custom_format_spec":  self.custom_format_entry.get().strip(),
+            "max_path_bytes":      self.max_bytes_var.get().strip(),
+            "format_mode":         self.format_mode_var.get(),
+            "custom_format_spec":  self.custom_format_var.get().strip(),
             "use_firefox_cookies": self.firefox_cookie_var.get(),
             "embed_thumbnail":     self.embed_thumb_var.get(),
             "download_playlist":   self.playlist_var.get(),
-            "font_family":         self.font_option_menu.get(),
+            "font_family":         self.font_family_var.get(),
         }
         try:
             with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
@@ -115,6 +115,29 @@ class SafeDownloaderGUI(ctk.CTk):
     # ------------------------------------------------------------------ #
 
     def _create_widgets(self):
+        # 共通変数の初期化
+        self.settings_window = None
+        self.firefox_cookie_var = ctk.BooleanVar(value=self.config.get("use_firefox_cookies", True))
+        self.embed_thumb_var = ctk.BooleanVar(value=self.config.get("embed_thumbnail", True))
+        self.playlist_var = ctk.BooleanVar(value=self.config.get("download_playlist", False))
+        
+        saved_mode = self.config.get("format_mode", "最高画質 (MP4優先・推奨)")
+        if "format_mode" not in self.config:
+            old_fmt = self.config.get("format_spec", "")
+            if old_fmt == PathSafeDownloader.DEFAULT_FORMAT_SPEC or "bestvideo[ext=mp4]" in old_fmt or not old_fmt:
+                saved_mode = "最高画質 (MP4優先・推奨)"
+            else:
+                saved_mode = "カスタム (直接入力)"
+        self.format_mode_var = ctk.StringVar(value=saved_mode)
+        
+        saved_custom = self.config.get("custom_format_spec", PathSafeDownloader.DEFAULT_FORMAT_SPEC)
+        if "custom_format_spec" not in self.config and "format_spec" in self.config:
+            saved_custom = self.config.get("format_spec")
+        self.custom_format_var = ctk.StringVar(value=saved_custom)
+        
+        self.max_bytes_var = ctk.StringVar(value=str(self.config.get("max_path_bytes", "240")))
+        self.font_family_var = ctk.StringVar(value=self.current_font_family)
+
         # メインフレーム
         self.main_frame = ctk.CTkFrame(self, corner_radius=10)
         self.main_frame.pack(padx=20, pady=20, fill="both", expand=True)
@@ -179,118 +202,25 @@ class SafeDownloaderGUI(ctk.CTk):
         )
         self.dir_browse_btn.pack(side="right")
 
-        # 3. オプション設定エリア
+        # 3. オプション設定エリア (プレイリストのみ残す)
         opts_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         opts_frame.pack(padx=20, pady=5, fill="x")
 
-        playlist_frame = ctk.CTkFrame(opts_frame, fg_color="transparent")
-        playlist_frame.pack(fill="x", pady=2)
-
-        self.playlist_var = ctk.BooleanVar(value=self.config.get("download_playlist", False))
         self.playlist_cb = ctk.CTkCheckBox(
-            playlist_frame,
+            opts_frame,
             text="プレイリストの全動画をDLする（OFFは単体DL）",
             variable=self.playlist_var,
             font=ctk.CTkFont(family=self.current_font_family, size=12),
         )
         self.playlist_cb.pack(side="left")
 
-        cb_frame = ctk.CTkFrame(opts_frame, fg_color="transparent")
-        cb_frame.pack(fill="x", pady=2)
-
-        self.firefox_cookie_var = ctk.BooleanVar(value=self.config.get("use_firefox_cookies", True))
-        self.firefox_cookie_cb = ctk.CTkCheckBox(
-            cb_frame,
-            text="Firefox クッキーを使用 (--cookies-from-browser firefox)",
+        self.settings_btn = ctk.CTkButton(
+            opts_frame, text="⚙️ 詳細設定",
+            width=100,
             font=ctk.CTkFont(family=self.current_font_family, size=12),
-            variable=self.firefox_cookie_var,
+            command=self._open_settings,
         )
-        self.firefox_cookie_cb.pack(side="left", padx=(0, 15))
-
-        self.embed_thumb_var = ctk.BooleanVar(value=self.config.get("embed_thumbnail", True))
-        self.embed_thumb_cb = ctk.CTkCheckBox(
-            cb_frame,
-            text="サムネイルを埋め込む (--embed-thumbnail)",
-            font=ctk.CTkFont(family=self.current_font_family, size=12),
-            variable=self.embed_thumb_var,
-        )
-        self.embed_thumb_cb.pack(side="left")
-
-        # フォーマット指定・最大バイト数・フォント切替
-        fmt_frame = ctk.CTkFrame(opts_frame, fg_color="transparent")
-        fmt_frame.pack(fill="x", pady=3)
-
-        self.fmt_label = ctk.CTkLabel(
-            fmt_frame, text="画質・フォーマット:",
-            font=ctk.CTkFont(family=self.current_font_family, size=12),
-        )
-        self.fmt_label.pack(side="left", padx=(0, 5))
-
-        inner_fmt_frame = ctk.CTkFrame(fmt_frame, fg_color="transparent")
-        inner_fmt_frame.pack(side="left", fill="x", expand=True, padx=(0, 10))
-
-        saved_mode = self.config.get("format_mode", "最高画質 (MP4優先・推奨)")
-        # 後方互換性: 古い format_spec がある場合の復元ロジック
-        if "format_mode" not in self.config:
-            old_fmt = self.config.get("format_spec", "")
-            if old_fmt == PathSafeDownloader.DEFAULT_FORMAT_SPEC or "bestvideo[ext=mp4]" in old_fmt or not old_fmt:
-                saved_mode = "最高画質 (MP4優先・推奨)"
-            else:
-                saved_mode = "カスタム (直接入力)"
-
-        self.format_option_menu = ctk.CTkOptionMenu(
-            inner_fmt_frame,
-            values=["最高画質 (MP4優先・推奨)", "最高画質 (WebM優先)", "カスタム (直接入力)"],
-            font=ctk.CTkFont(family=self.current_font_family, size=12),
-            command=self._on_format_changed,
-        )
-        self.format_option_menu.set(saved_mode)
-        self.format_option_menu.pack(side="left")
-
-        saved_custom = self.config.get("custom_format_spec", PathSafeDownloader.DEFAULT_FORMAT_SPEC)
-        # 後方互換性
-        if "custom_format_spec" not in self.config and "format_spec" in self.config:
-            saved_custom = self.config.get("format_spec")
-
-        self.custom_format_entry = ctk.CTkEntry(
-            inner_fmt_frame, font=ctk.CTkFont(family=self.current_font_family, size=12), width=200
-        )
-        self.custom_format_entry.insert(0, saved_custom)
-        self._add_context_menu(self.custom_format_entry)
-
-        if saved_mode == "カスタム (直接入力)":
-            self.custom_format_entry.pack(side="left", fill="x", expand=True, padx=(5, 0))
-
-        self.max_bytes_label = ctk.CTkLabel(
-            fmt_frame, text="最大パスバイト:",
-            font=ctk.CTkFont(family=self.current_font_family, size=12),
-        )
-        self.max_bytes_label.pack(side="left", padx=(0, 5))
-
-        saved_max_bytes = str(self.config.get("max_path_bytes", "240"))
-        self.max_bytes_entry = ctk.CTkEntry(
-            fmt_frame, width=50,
-            font=ctk.CTkFont(family=self.current_font_family, size=12),
-        )
-        self.max_bytes_entry.insert(0, saved_max_bytes)
-        self.max_bytes_entry.pack(side="left", padx=(0, 10))
-        self._add_context_menu(self.max_bytes_entry)
-
-        self.font_label = ctk.CTkLabel(
-            fmt_frame, text="フォント:",
-            font=ctk.CTkFont(family=self.current_font_family, size=12),
-        )
-        self.font_label.pack(side="left", padx=(0, 5))
-
-        self.font_option_menu = ctk.CTkOptionMenu(
-            fmt_frame,
-            values=AVAILABLE_FONTS,
-            width=130,
-            font=ctk.CTkFont(family=self.current_font_family, size=12),
-            command=self._on_font_selected,
-        )
-        self.font_option_menu.set(self.current_font_family)
-        self.font_option_menu.pack(side="left")
+        self.settings_btn.pack(side="right")
 
         # 4. ボタンエリア
         btn_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
@@ -496,12 +426,86 @@ class SafeDownloaderGUI(ctk.CTk):
         self.url_textbox.configure(state="normal")
         self._show_placeholder()
 
+    def _open_settings(self):
+        """詳細設定ポップアップを開く"""
+        if self.settings_window is None or not self.settings_window.winfo_exists():
+            self.settings_window = ctk.CTkToplevel(self)
+            self.settings_window.title("詳細設定")
+            self.settings_window.geometry("500x320")
+            self.settings_window.attributes("-topmost", True)
+            
+            pad_opts = {"padx": 20, "pady": 10, "fill": "x"}
+            
+            # クッキー＆サムネイル
+            cb_frame = ctk.CTkFrame(self.settings_window, fg_color="transparent")
+            cb_frame.pack(**pad_opts)
+            
+            self.firefox_cookie_cb = ctk.CTkCheckBox(
+                cb_frame, text="Firefox クッキーを使用", variable=self.firefox_cookie_var,
+                font=ctk.CTkFont(family=self.current_font_family, size=12)
+            )
+            self.firefox_cookie_cb.pack(side="left", padx=(0, 15))
+            
+            self.embed_thumb_cb = ctk.CTkCheckBox(
+                cb_frame, text="サムネイルを埋め込む", variable=self.embed_thumb_var,
+                font=ctk.CTkFont(family=self.current_font_family, size=12)
+            )
+            self.embed_thumb_cb.pack(side="left")
+            
+            # 画質・フォーマット
+            fmt_frame = ctk.CTkFrame(self.settings_window, fg_color="transparent")
+            fmt_frame.pack(**pad_opts)
+            ctk.CTkLabel(fmt_frame, text="画質・フォーマット:", font=ctk.CTkFont(family=self.current_font_family, size=12)).pack(side="left", padx=(0, 5))
+            
+            inner_fmt = ctk.CTkFrame(fmt_frame, fg_color="transparent")
+            inner_fmt.pack(side="left", fill="x", expand=True)
+            
+            self.format_option_menu = ctk.CTkOptionMenu(
+                inner_fmt, variable=self.format_mode_var,
+                values=["最高画質 (MP4優先・推奨)", "最高画質 (WebM優先)", "カスタム (直接入力)"],
+                font=ctk.CTkFont(family=self.current_font_family, size=12),
+                command=self._on_format_changed
+            )
+            self.format_option_menu.pack(side="left")
+            
+            self.custom_format_entry = ctk.CTkEntry(
+                inner_fmt, textvariable=self.custom_format_var,
+                font=ctk.CTkFont(family=self.current_font_family, size=12), width=180
+            )
+            self._add_context_menu(self.custom_format_entry)
+            if self.format_mode_var.get() == "カスタム (直接入力)":
+                self.custom_format_entry.pack(side="left", fill="x", expand=True, padx=(5, 0))
+                
+            # その他 (最大バイト・フォント)
+            misc_frame = ctk.CTkFrame(self.settings_window, fg_color="transparent")
+            misc_frame.pack(**pad_opts)
+            
+            ctk.CTkLabel(misc_frame, text="最大パスバイト:", font=ctk.CTkFont(family=self.current_font_family, size=12)).pack(side="left", padx=(0, 5))
+            self.max_bytes_entry = ctk.CTkEntry(
+                misc_frame, textvariable=self.max_bytes_var, width=50,
+                font=ctk.CTkFont(family=self.current_font_family, size=12)
+            )
+            self.max_bytes_entry.pack(side="left", padx=(0, 15))
+            self._add_context_menu(self.max_bytes_entry)
+            
+            ctk.CTkLabel(misc_frame, text="表示フォント:", font=ctk.CTkFont(family=self.current_font_family, size=12)).pack(side="left", padx=(0, 5))
+            self.font_option_menu = ctk.CTkOptionMenu(
+                misc_frame, variable=self.font_family_var, values=AVAILABLE_FONTS, width=130,
+                font=ctk.CTkFont(family=self.current_font_family, size=12),
+                command=self._on_font_selected
+            )
+            self.font_option_menu.pack(side="left")
+
+        else:
+            self.settings_window.focus()
+
     def _on_format_changed(self, choice):
         """フォーマットのドロップダウン変更時のUI動的切り替え"""
-        if choice == "カスタム (直接入力)":
-            self.custom_format_entry.pack(side="left", fill="x", expand=True, padx=(5, 0))
-        else:
-            self.custom_format_entry.pack_forget()
+        if hasattr(self, 'custom_format_entry') and self.custom_format_entry.winfo_exists():
+            if choice == "カスタム (直接入力)":
+                self.custom_format_entry.pack(side="left", fill="x", expand=True, padx=(5, 0))
+            else:
+                self.custom_format_entry.pack_forget()
 
     def _on_cancel_clicked(self):
         """キャンセルボタンが押された時の処理"""
@@ -514,11 +518,13 @@ class SafeDownloaderGUI(ctk.CTk):
         """処理中の UI 要素の有効化 / 無効化制御"""
         for widget in (
             self.url_textbox, self.dir_entry, self.dir_browse_btn,
-            self.firefox_cookie_cb, self.embed_thumb_cb, self.playlist_cb,
-            self.format_option_menu, self.custom_format_entry, self.max_bytes_entry,
-            self.font_option_menu, self.preview_btn,
+            self.playlist_cb, self.settings_btn, self.preview_btn,
         ):
             widget.configure(state=state)
+
+        if state == "disabled" and self.settings_window and self.settings_window.winfo_exists():
+            self.settings_window.destroy()
+            self.settings_window = None
 
         if state == "disabled":
             # ダウンロード中: 開始ボタンを停止ボタンに変更
@@ -553,8 +559,8 @@ class SafeDownloaderGUI(ctk.CTk):
             max_path_bytes=max_b,
             title_ratio=0.7,
             use_firefox_cookies=self.firefox_cookie_var.get(),
-            format_mode=self.format_option_menu.get(),
-            custom_format_spec=self.custom_format_entry.get().strip(),
+            format_mode=self.format_mode_var.get(),
+            custom_format_spec=self.custom_format_var.get().strip(),
             embed_thumbnail=self.embed_thumb_var.get(),
             download_playlist=self.playlist_var.get(),
         )
