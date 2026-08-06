@@ -182,6 +182,18 @@ class SafeDownloaderGUI(ctk.CTk):
         opts_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         opts_frame.pack(padx=20, pady=5, fill="x")
 
+        playlist_frame = ctk.CTkFrame(opts_frame, fg_color="transparent")
+        playlist_frame.pack(fill="x", pady=2)
+
+        self.playlist_var = ctk.BooleanVar(value=self.config.get("download_playlist", False))
+        self.playlist_cb = ctk.CTkCheckBox(
+            playlist_frame,
+            text="プレイリストの全動画をDLする（OFFは単体DL）",
+            variable=self.playlist_var,
+            font=ctk.CTkFont(family=self.current_font_family, size=12),
+        )
+        self.playlist_cb.pack(side="left")
+
         cb_frame = ctk.CTkFrame(opts_frame, fg_color="transparent")
         cb_frame.pack(fill="x", pady=2)
 
@@ -202,15 +214,6 @@ class SafeDownloaderGUI(ctk.CTk):
             variable=self.embed_thumb_var,
         )
         self.embed_thumb_cb.pack(side="left")
-
-        self.playlist_var = ctk.BooleanVar(value=self.config.get("download_playlist", False))
-        self.playlist_cb = ctk.CTkCheckBox(
-            cb_frame,
-            text="合集やリストの全動画を一括DLする (OFF時は単体DL)",
-            variable=self.playlist_var,
-            font=ctk.CTkFont(family=self.current_font_family, size=12),
-        )
-        self.playlist_cb.pack(side="left", padx=(15, 0))
 
         # フォーマット指定・最大バイト数・フォント切替
         fmt_frame = ctk.CTkFrame(opts_frame, fg_color="transparent")
@@ -488,7 +491,7 @@ class SafeDownloaderGUI(ctk.CTk):
         if state == "disabled":
             # ダウンロード中: 開始ボタンを停止ボタンに変更
             self.download_btn.configure(
-                text="🛑 キャンセル (停止)",
+                text="■停止",
                 fg_color="#c0392b",
                 hover_color="#e74c3c",
                 command=self._on_cancel_clicked,
@@ -499,8 +502,8 @@ class SafeDownloaderGUI(ctk.CTk):
             # ThemeManager のデフォルトまたは適当な青系色に戻す
             self.download_btn.configure(
                 text="一括ダウンロード開始",
-                fg_color=["#3B8ED0", "#1F6AA5"],
-                hover_color=["#36719F", "#144870"],
+                fg_color="#10B981",
+                hover_color="#059669",
                 command=self.start_download,
                 state="normal"
             )
