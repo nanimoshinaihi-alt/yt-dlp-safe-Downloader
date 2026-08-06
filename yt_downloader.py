@@ -316,7 +316,16 @@ class PathSafeDownloader:
                 handle = info.get("channel") or uploader_id or "Unknown"
             return handle.strip().lstrip("@") or "Unknown"
         if site_name == "tiktok":
-            return (uploader_id or uploader or "Unknown").strip().lstrip("@") or "Unknown"
+            handle = uploader
+            if not handle or handle.isdigit():
+                handle = uploader_id
+            if not handle or handle.isdigit():
+                # URL から @アカウント名 を抽出するフォールバック
+                webpage_url = (info.get("webpage_url") or url).lower()
+                m = re.search(r'tiktok\.com/@([^/]+)', webpage_url)
+                if m:
+                    handle = m.group(1)
+            return (handle or "Unknown").strip().lstrip("@") or "Unknown"
         return uploader or uploader_id or "不明"
 
     def extract_clean_title(self, info: Dict[str, Any], url: str = "") -> str:
