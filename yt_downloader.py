@@ -12,7 +12,7 @@ import time
 import logging
 import subprocess
 from datetime import datetime
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, List
 
 import yt_dlp
 
