@@ -434,27 +434,23 @@ class SafeDownloaderGUI(ctk.CTk):
             self.settings_window.geometry("500x320")
             self.settings_window.attributes("-topmost", True)
             
-            pad_opts = {"padx": 20, "pady": 10, "fill": "x"}
-            
-            # クッキー＆サムネイル
-            cb_frame = ctk.CTkFrame(self.settings_window, fg_color="transparent")
-            cb_frame.pack(**pad_opts)
-            
+            # クッキー
             self.firefox_cookie_cb = ctk.CTkCheckBox(
-                cb_frame, text="Firefox クッキーを使用", variable=self.firefox_cookie_var,
+                self.settings_window, text="Firefox Cookieを使用", variable=self.firefox_cookie_var,
                 font=ctk.CTkFont(family=self.current_font_family, size=12)
             )
-            self.firefox_cookie_cb.pack(side="left", padx=(0, 15))
+            self.firefox_cookie_cb.pack(padx=20, pady=(15, 5), anchor="w")
             
+            # サムネイル
             self.embed_thumb_cb = ctk.CTkCheckBox(
-                cb_frame, text="サムネイルを埋め込む", variable=self.embed_thumb_var,
+                self.settings_window, text="サムネイルを埋め込む", variable=self.embed_thumb_var,
                 font=ctk.CTkFont(family=self.current_font_family, size=12)
             )
-            self.embed_thumb_cb.pack(side="left")
+            self.embed_thumb_cb.pack(padx=20, pady=5, anchor="w")
             
             # 画質・フォーマット
             fmt_frame = ctk.CTkFrame(self.settings_window, fg_color="transparent")
-            fmt_frame.pack(**pad_opts)
+            fmt_frame.pack(padx=20, pady=5, fill="x")
             ctk.CTkLabel(fmt_frame, text="画質・フォーマット:", font=ctk.CTkFont(family=self.current_font_family, size=12)).pack(side="left", padx=(0, 5))
             
             inner_fmt = ctk.CTkFrame(fmt_frame, fg_color="transparent")
@@ -476,21 +472,25 @@ class SafeDownloaderGUI(ctk.CTk):
             if self.format_mode_var.get() == "カスタム (直接入力)":
                 self.custom_format_entry.pack(side="left", fill="x", expand=True, padx=(5, 0))
                 
-            # その他 (最大バイト・フォント)
-            misc_frame = ctk.CTkFrame(self.settings_window, fg_color="transparent")
-            misc_frame.pack(**pad_opts)
+            # 最大ファイル名バイト数
+            byte_frame = ctk.CTkFrame(self.settings_window, fg_color="transparent")
+            byte_frame.pack(padx=20, pady=5, fill="x")
             
-            ctk.CTkLabel(misc_frame, text="最大パスバイト:", font=ctk.CTkFont(family=self.current_font_family, size=12)).pack(side="left", padx=(0, 5))
+            ctk.CTkLabel(byte_frame, text="最大ファイル名バイト数:", font=ctk.CTkFont(family=self.current_font_family, size=12)).pack(side="left", padx=(0, 5))
             self.max_bytes_entry = ctk.CTkEntry(
-                misc_frame, textvariable=self.max_bytes_var, width=50,
+                byte_frame, textvariable=self.max_bytes_var, width=50,
                 font=ctk.CTkFont(family=self.current_font_family, size=12)
             )
-            self.max_bytes_entry.pack(side="left", padx=(0, 15))
+            self.max_bytes_entry.pack(side="left")
             self._add_context_menu(self.max_bytes_entry)
             
-            ctk.CTkLabel(misc_frame, text="表示フォント:", font=ctk.CTkFont(family=self.current_font_family, size=12)).pack(side="left", padx=(0, 5))
+            # 表示フォント
+            font_frame = ctk.CTkFrame(self.settings_window, fg_color="transparent")
+            font_frame.pack(padx=20, pady=5, fill="x")
+            
+            ctk.CTkLabel(font_frame, text="表示フォント:", font=ctk.CTkFont(family=self.current_font_family, size=12)).pack(side="left", padx=(0, 5))
             self.font_option_menu = ctk.CTkOptionMenu(
-                misc_frame, variable=self.font_family_var, values=AVAILABLE_FONTS, width=130,
+                font_frame, variable=self.font_family_var, values=AVAILABLE_FONTS, width=130,
                 font=ctk.CTkFont(family=self.current_font_family, size=12),
                 command=self._on_font_selected
             )
