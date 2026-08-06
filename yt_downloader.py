@@ -385,9 +385,10 @@ class PathSafeDownloader:
         if self.use_firefox_cookies:
             opts["cookiesfrombrowser"] = ("firefox",)
         if self.embed_thumbnail:
-            opts["writethumbnails"] = True
+            opts["writethumbnail"] = True
             opts["postprocessors"] = [
-                {"key": "EmbedThumbnail", "already_have_thumbnail": False}
+                {"key": "FFmpegMetadata"},
+                {"key": "EmbedThumbnail"}
             ]
         return opts
 
