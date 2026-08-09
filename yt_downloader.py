@@ -474,12 +474,21 @@ class PathSafeDownloader:
             # 最初に見つかった有効なエントリを返す (画像エラーはNoneになるため弾く)
             valid_entries = [e for e in info["entries"] if e is not None]
             if valid_entries:
-                first_entry = valid_entries[0]
+                target_idx = 0
+                if extra_ydl_opts and "playlist_items" in extra_ydl_opts:
+                    try:
+                        target_idx = int(extra_ydl_opts["playlist_items"]) - 1
+                        if target_idx < 0 or target_idx >= len(valid_entries):
+                            target_idx = 0
+                    except Exception:
+                        pass
+                
+                target_entry = valid_entries[target_idx]
                 # 親プレイリストのメタデータを引き継ぐ (存在しない場合のみ)
                 for key in ["upload_date", "timestamp", "uploader", "uploader_id", "channel", "title"]:
-                    if not first_entry.get(key) and info.get(key):
-                        first_entry[key] = info[key]
-                info = first_entry
+                    if not target_entry.get(key) and info.get(key):
+                        target_entry[key] = info.get(key)
+                info = target_entry
 
         # upload_date が欠落している場合、timestamp から補完する
         if not info.get("upload_date") and info.get("timestamp"):
@@ -506,6 +515,10 @@ class PathSafeDownloader:
         """
         # 1. メタデータ取得
         info = self.fetch_info(url, extra_ydl_opts)
+        
+        # Twitterの複数動画等、単一URLでentriesが返る場合は最初のエントリ(playlist_items指定時はそのアイテム)のメタデータを使う
+        if "entries" in info and info["entries"]:
+            info = info["entries"][0]
 
         upload_date = info.get("upload_date") or ""
         video_id    = info.get("id") or ""
@@ -675,14 +688,19 @@ class PathSafeDownloader:
                 break
             
             entry_url = entry.get("url") or entry.get("webpage_url")
-            if not entry_url:
-                continue
+            current_url = entry_url
+            current_extra_opts = dict(extra_ydl_opts) if extra_ydl_opts else {}
             
+            # Twitterのメディア等、フラット展開時に個別URLを持たない・親と同じURLになるアイテム用フォールバック
+            if not current_url or current_url == url:
+                current_url = url
+                current_extra_opts["playlist_items"] = str(idx)
+                
             if playlist_progress_hook:
-                playlist_progress_hook(idx, len(entries), entry_url)
+                playlist_progress_hook(idx, len(entries), current_url)
             logger.info(f"--- プレイリスト ({idx}/{len(entries)}) ---")
             try:
-                res = self._download_single(entry_url, extra_ydl_opts, check_cancel_hook)
+                res = self._download_single(current_url, current_extra_opts, check_cancel_hook)
                 results.append(res)
                 if item_completed_hook:
                     item_completed_hook(res[0])
