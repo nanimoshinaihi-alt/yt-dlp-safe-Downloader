@@ -681,26 +681,74 @@ class PathSafeDownloader:
                 item_completed_hook(res[0])
             return [res]
 
-        results = []
+        # 入れ子になったプレイリスト（合集内の分P動画など）を平坦化
+        flattened_items: List[Dict[str, Any]] = []
         for idx, entry in enumerate(entries, 1):
+            if self.cancel_flag:
+                break
+            
+            entry_url = entry.get("url") or entry.get("webpage_url")
+            current_extra_opts = dict(extra_ydl_opts) if extra_ydl_opts else {}
+            
+            # Twitterのメディア等、フラット展開時に個別URLを持たない・親と同じURLになるアイテム
+            if not entry_url or entry_url == url:
+                current_extra_opts["playlist_items"] = str(idx)
+                flattened_items.append({
+                    "url": url,
+                    "extra_opts": current_extra_opts,
+                })
+                continue
+            
+            # Bilibiliの合集に含まれる分P動画など、子エントリがさらにプレイリストを持つ場合の展開チェック
+            is_potential_nested = (
+                entry.get("_type") == "playlist" or
+                ("bilibili.com/video/" in entry_url and "?p=" not in entry_url)
+            )
+            if is_potential_nested:
+                try:
+                    with yt_dlp.YoutubeDL(opts) as sub_ydl:
+                        sub_info = sub_ydl.extract_info(entry_url, download=False, process=False)
+                    sub_entries_raw = sub_info.get("entries") if sub_info else []
+                    sub_entries = list(sub_entries_raw) if sub_entries_raw else []
+                    if len(sub_entries) > 1:
+                        for s_idx, s_entry in enumerate(sub_entries, 1):
+                            s_url = s_entry.get("url") or s_entry.get("webpage_url")
+                            s_opts = dict(extra_ydl_opts) if extra_ydl_opts else {}
+                            if s_url:
+                                flattened_items.append({
+                                    "url": s_url,
+                                    "extra_opts": s_opts,
+                                })
+                            else:
+                                s_opts["playlist_items"] = str(s_idx)
+                                flattened_items.append({
+                                    "url": entry_url,
+                                    "extra_opts": s_opts,
+                                })
+                        continue
+                except Exception as e:
+                    logger.debug(f"入れ子プレイリストの展開スキップ: {e}")
+
+            flattened_items.append({
+                "url": entry_url,
+                "extra_opts": current_extra_opts,
+            })
+
+        results = []
+        total_items = len(flattened_items)
+        for idx, item in enumerate(flattened_items, 1):
             if self.cancel_flag:
                 logger.warning("キャンセルされたため、プレイリスト以降のダウンロードを中止します。")
                 break
             
-            entry_url = entry.get("url") or entry.get("webpage_url")
-            current_url = entry_url
-            current_extra_opts = dict(extra_ydl_opts) if extra_ydl_opts else {}
+            item_url = item["url"]
+            item_opts = item["extra_opts"]
             
-            # Twitterのメディア等、フラット展開時に個別URLを持たない・親と同じURLになるアイテム用フォールバック
-            if not current_url or current_url == url:
-                current_url = url
-                current_extra_opts["playlist_items"] = str(idx)
-                
             if playlist_progress_hook:
-                playlist_progress_hook(idx, len(entries), current_url)
-            logger.info(f"--- プレイリスト ({idx}/{len(entries)}) ---")
+                playlist_progress_hook(idx, total_items, item_url)
+            logger.info(f"--- プレイリスト ({idx}/{total_items}) ---")
             try:
-                res = self._download_single(current_url, current_extra_opts, check_cancel_hook)
+                res = self._download_single(item_url, item_opts, check_cancel_hook)
                 results.append(res)
                 if item_completed_hook:
                     item_completed_hook(res[0])
