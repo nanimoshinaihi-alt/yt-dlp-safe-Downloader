@@ -8,6 +8,7 @@ import os
 import re
 import sys
 import json
+import glob
 import time
 import logging
 import subprocess
@@ -117,6 +118,9 @@ class PathSafeDownloader:
 
     # 標準フォーマット指定 (最高の映像と音声を自動取得しMP4へ無劣化結合)
     DEFAULT_FORMAT_SPEC = "bestvideo+bestaudio/best"
+
+    # ダウンロード成功判定に使う動画ファイル拡張子
+    VIDEO_EXTS = (".mp4", ".mkv", ".webm", ".mov", ".m4v", ".flv", ".avi", ".ts")
 
     # フォーマット選択の優先ルール
     # hasvid: 映像ありを優先 / lang: オリジナル言語優先（吹き替え回避）
@@ -513,12 +517,8 @@ class PathSafeDownloader:
         事前メタデータ取得 → 安全なパス計算 → 本番ダウンロード。
         ネットワーク切断時は自動レジューム、クッキーブロック時は自動フォールバック。
         """
-        # 1. メタデータ取得
+        # 1. メタデータ取得 (entries は fetch_info 内で単一エントリに解決済み)
         info = self.fetch_info(url, extra_ydl_opts)
-        
-        # Twitterの複数動画等、単一URLでentriesが返る場合は最初のエントリ(playlist_items指定時はそのアイテム)のメタデータを使う
-        if "entries" in info and info["entries"]:
-            info = info["entries"][0]
 
         upload_date = info.get("upload_date") or ""
         video_id    = info.get("id") or ""
@@ -629,7 +629,23 @@ class PathSafeDownloader:
 
                 raise
 
-        # 5. 履歴登録
+        # 5. 実ファイルの存在検証
+        # ignoreerrors=True かつ致命的エラーパターンに一致しなかった場合、
+        # yt-dlp がエラーを警告として握りつぶしただけで実際は何も保存されていないことがある
+        # (例: TikTokの抽出失敗で「成功扱い」だがファイルが生成されないケース)。
+        produced = [
+            p for p in glob.glob(os.path.join(glob.escape(self.output_dir), glob.escape(filename_without_ext) + ".*"))
+            if p.lower().endswith(self.VIDEO_EXTS)
+        ]
+        if not produced:
+            raise ValueError(
+                "ダウンロード処理は完了しましたが、出力ファイルが見つかりませんでした。"
+                "サイト側の抽出エラーの可能性があります（ログ内の警告を確認してください）。"
+            )
+        # 実際の拡張子 (フォーマット設定によりmp4以外になる場合があるため) で確定させる
+        safe_full_path = produced[0]
+
+        # 6. 履歴登録
         self.register_download_history(safe_full_path, video_id)
         logger.info(f"ダウンロード完了: {safe_full_path}")
         return safe_full_path, info

@@ -9,6 +9,9 @@ downloads/
 # Local personal config file (auto-generated on app launch)
 config.json
 
+# Local download history (auto-generated, grows unbounded, personal data)
+download_history.json
+
 # Virtual environments
 .venv/
 venv/
