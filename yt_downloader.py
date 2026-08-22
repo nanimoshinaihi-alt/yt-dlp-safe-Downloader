@@ -36,8 +36,8 @@ def update_yt_dlp(status_callback: Optional[Callable[[str], None]] = None) -> bo
 
     try:
         _notify("yt-dlp の更新チェック中...")
-        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp", "curl_cffi"]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
         if "Successfully installed" in result.stdout:
             _notify("yt-dlp を最新バージョンに更新しました！")
