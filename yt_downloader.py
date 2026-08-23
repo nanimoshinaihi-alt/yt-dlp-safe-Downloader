@@ -116,6 +116,13 @@ class PathSafeDownloader:
         "Sign in",
     )
 
+    # TikTok bot対策(WAF)チャレンジ失敗の検知文字列
+    # 古いFirefoxセッションCookieがチャレンジ解決を妨げている場合があり、
+    # Cookieなし再試行 + 間隔を空けた複数回リトライで回復することがある
+    _TIKTOK_WAF_PATTERNS = (
+        "universal data for rehydration",
+    )
+
     # 標準フォーマット指定 (最高の映像と音声を自動取得しMP4へ無劣化結合)
     DEFAULT_FORMAT_SPEC = "bestvideo+bestaudio/best"
 
@@ -446,6 +453,12 @@ class PathSafeDownloader:
         lower = err_str.lower()
         return any(p.lower() in lower for p in cls._LOGIN_REQUIRED_PATTERNS)
 
+    @classmethod
+    def _is_tiktok_waf(cls, err_str: str) -> bool:
+        """TikTokのbot対策(WAF)チャレンジ失敗かどうかを判定"""
+        lower = err_str.lower()
+        return any(p.lower() in lower for p in cls._TIKTOK_WAF_PATTERNS)
+
     # ------------------------------------------------------------------ #
     #  公開API                                                             #
     # ------------------------------------------------------------------ #
@@ -563,6 +576,9 @@ class PathSafeDownloader:
         resume_count = 0
         cookie_fallback_done = False
 
+        MAX_WAF_RETRY = 5
+        waf_retry_count = 0
+
         while True:
             # 毎回新しいエラーキャプチャロガーをセット
             capture_logger = YTDlpErrorCaptureLogger(logger)
@@ -579,7 +595,12 @@ class PathSafeDownloader:
                         continue
                     
                     # 致命的エラーの場合は再スローして以下の except ブロックに処理させる
-                    if self._is_network_drop(err_str) or self._is_cookie_block(err_str) or self._is_login_required(err_str):
+                    if (
+                        self._is_network_drop(err_str)
+                        or self._is_cookie_block(err_str)
+                        or self._is_login_required(err_str)
+                        or self._is_tiktok_waf(err_str)
+                    ):
                         raise ValueError(err_str)
                     
                     # その他の不明なエラーは念のためログに残すが続行 (プレイリストの1つが死んだだけかもしれないため)
@@ -601,6 +622,31 @@ class PathSafeDownloader:
                         continue
                     raise ValueError(
                         f"ネットワーク切断が多発しダウンロードを中断しました。({MAX_RESUME}回再試行失敗)"
+                    )
+
+                # ケース1.5: TikTok bot対策(WAF)チャレンジ失敗
+                # → まずCookieを外して1回リトライ（古いセッションCookieが干渉している場合の切り分け）
+                #   その後も失敗する場合はWAF側の一時的な負荷/レート制限とみなし、間隔を空けて複数回リトライ
+                if self._is_tiktok_waf(err_str):
+                    if (
+                        not cookie_fallback_done
+                        and self.use_firefox_cookies
+                        and "cookiesfrombrowser" in ydl_opts
+                    ):
+                        logger.warning("TikTokのbot対策(WAF)を検知。Cookieなしで再試行します...")
+                        ydl_opts.pop("cookiesfrombrowser", None)
+                        cookie_fallback_done = True
+                        time.sleep(2)
+                        continue
+                    if waf_retry_count < MAX_WAF_RETRY:
+                        waf_retry_count += 1
+                        logger.warning(
+                            f"TikTokのbot対策(WAF)による一時的な失敗を検知。再試行します... ({waf_retry_count}/{MAX_WAF_RETRY})"
+                        )
+                        time.sleep(4)
+                        continue
+                    raise ValueError(
+                        f"TikTokのbot対策(WAF)を突破できませんでした。時間を置いて再度お試しください。({MAX_WAF_RETRY}回再試行失敗)"
                     )
 
                 # ケース2: クッキーブロック → クッキーなしでリトライ（1回限り）
