@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import json
+import time
 import threading
 import subprocess
 import tkinter as tk
@@ -51,6 +52,8 @@ class SafeDownloaderGUI(ctk.CTk):
         self.resizable(True, True)
 
         self.is_placeholder_active = False
+        # バッチ全体の停止フラグ（downloader.cancel_flag は download() 呼び出し毎にリセットされるため別管理）
+        self._batch_cancel_requested = False
 
         # 設定ファイルの読み込み
         self.config = self._load_config()
@@ -148,12 +151,23 @@ class SafeDownloaderGUI(ctk.CTk):
         url_frame = ctk.CTkFrame(self.main_frame, fg_color="transparent")
         url_frame.pack(padx=20, pady=5, fill="x")
 
+        url_label_frame = ctk.CTkFrame(url_frame, fg_color="transparent")
+        url_label_frame.pack(fill="x")
+
         self.url_label = ctk.CTkLabel(
-            url_frame,
+            url_label_frame,
             text="動画 URL (改行で複数並べて入力できます):",
             font=ctk.CTkFont(family=self.current_font_family, weight="bold"),
         )
-        self.url_label.pack(anchor="w")
+        self.url_label.pack(side="left", anchor="w")
+
+        self.url_clear_btn = ctk.CTkButton(
+            url_label_frame, text="クリア", width=60,
+            fg_color="transparent", border_width=1, text_color=("gray10", "gray90"),
+            font=ctk.CTkFont(family=self.current_font_family, size=11),
+            command=self._clear_url_textbox,
+        )
+        self.url_clear_btn.pack(side="right")
 
         self.url_textbox = ctk.CTkTextbox(
             url_frame, height=90,
@@ -319,6 +333,7 @@ class SafeDownloaderGUI(ctk.CTk):
         main_widget_fonts = [
             (self.title_label,    large),
             (self.url_label,      bold),
+            (self.url_clear_btn,  normal),
             (self.url_textbox,    normal),
             (self.dir_label,      bold),
             (self.dir_entry,      normal),
@@ -430,6 +445,17 @@ class SafeDownloaderGUI(ctk.CTk):
         self.url_textbox.configure(state="normal")
         self._show_placeholder()
 
+    def _restore_failed_urls(self, failed_urls: list):
+        """一括DL完了後、成功したURLを消去し失敗したURLだけをURL欄に残す（全成功時はプレースホルダーに戻す）"""
+        if not failed_urls:
+            self._clear_url_textbox()
+            return
+        self.url_textbox.configure(state="normal")
+        self.url_textbox.delete("1.0", "end")
+        self.url_textbox.configure(text_color=("black", "white"))
+        self.url_textbox.insert("1.0", "\n".join(failed_urls) + "\n")
+        self.is_placeholder_active = False
+
     def _open_settings(self):
         """詳細設定ポップアップを開く"""
         if self.settings_window is None or not self.settings_window.winfo_exists():
@@ -513,6 +539,7 @@ class SafeDownloaderGUI(ctk.CTk):
 
     def _on_cancel_clicked(self):
         """キャンセルボタンが押された時の処理"""
+        self._batch_cancel_requested = True
         if hasattr(self, 'downloader') and self.downloader:
             self.downloader.cancel_download()
             self.download_btn.configure(text="キャンセル処理中...", state="disabled")
@@ -521,7 +548,7 @@ class SafeDownloaderGUI(ctk.CTk):
     def _set_ui_state(self, state: str):
         """処理中の UI 要素の有効化 / 無効化制御"""
         for widget in (
-            self.url_textbox, self.dir_entry, self.dir_browse_btn,
+            self.url_textbox, self.url_clear_btn, self.dir_entry, self.dir_browse_btn,
             self.playlist_cb, self.settings_btn, self.preview_btn,
         ):
             widget.configure(state=state)
@@ -650,6 +677,7 @@ class SafeDownloaderGUI(ctk.CTk):
 
         self._save_config()
         self._set_ui_state("disabled")
+        self._batch_cancel_requested = False
         self.status_label.configure(text="一括ダウンロード準備中...")
         self.progress_bar.set(0)
         threading.Thread(target=self._download_worker, args=(urls,), daemon=True).start()
@@ -677,51 +705,87 @@ class SafeDownloaderGUI(ctk.CTk):
 
         return progress_hook
 
+    # バッチ全体レベルでの失敗URL自動再試行の設定
+    MAX_BATCH_RETRY_ROUNDS = 5
+    BATCH_RETRY_DELAY_SEC = 5
+
     def _download_worker(self, urls: list):
         success_count = 0
-        fail_count    = 0
         total_count   = len(urls)
+        pending_urls  = list(urls)
+        round_num     = 0
 
         self.after(0, lambda: self._log_info(f"=== 一括ダウンロード開始 (全{total_count}件) ===", clear=True))
         self.downloader = self._get_downloader()
 
-        for idx, url in enumerate(urls, 1):
-            self.after(0, lambda i=idx, t=total_count: self.status_label.configure(
-                text=f"[{i}/{t}件目] 処理準備中..."
-            ))
-            try:
-                hook       = self._make_progress_hook(idx, total_count)
-                
-                def plist_hook(p_idx, p_total, p_url):
-                    msg = f"\n--- プレイリスト ({p_idx}/{p_total}) ---\n"
+        # ラウンド1 = 初回、ラウンド2以降 = 失敗分の自動再試行（最大 MAX_BATCH_RETRY_ROUNDS 回）
+        while pending_urls and not self._batch_cancel_requested and round_num <= self.MAX_BATCH_RETRY_ROUNDS:
+            round_num += 1
+            current_batch = pending_urls
+            current_total = len(current_batch)
+
+            if round_num > 1:
+                msg = (
+                    f"\n=== 失敗分を自動再試行します "
+                    f"({round_num - 1}/{self.MAX_BATCH_RETRY_ROUNDS}回目, 対象{current_total}件) ===\n"
+                )
+                self.after(0, lambda m=msg: self._log_info(m))
+                time.sleep(self.BATCH_RETRY_DELAY_SEC)
+                if self._batch_cancel_requested:
+                    break
+
+            next_pending: list = []
+            for idx, url in enumerate(current_batch, 1):
+                if self._batch_cancel_requested:
+                    next_pending.extend(current_batch[idx - 1:])
+                    break
+
+                self.after(0, lambda i=idx, t=current_total: self.status_label.configure(
+                    text=f"[{i}/{t}件目] 処理準備中..."
+                ))
+                try:
+                    hook = self._make_progress_hook(idx, current_total)
+
+                    def plist_hook(p_idx, p_total, p_url):
+                        msg = f"\n--- プレイリスト ({p_idx}/{p_total}) ---\n"
+                        self.after(0, lambda m=msg: self._log_info(m))
+
+                    def item_hook(saved_path):
+                        nonlocal success_count
+                        success_count += 1
+                        msg = f"[{idx}/{current_total}] 成功: {os.path.basename(saved_path)}\n"
+                        self.after(0, lambda m=msg: self._log_info(m))
+
+                    saved_results = self.downloader.download(
+                        url,
+                        progress_hook=hook,
+                        playlist_progress_hook=plist_hook,
+                        item_completed_hook=item_hook
+                    )
+                    if not saved_results:
+                        # 例外は出なかったが1件も成功しなかった場合（プレイリスト全滅等）も失敗扱い
+                        next_pending.append(url)
+                        msg = f"[{idx}/{current_total}] 失敗: {url}\n  エラー内容: 有効な動画を1件も取得できませんでした\n"
+                        self.after(0, lambda m=msg: self._log_info(m))
+                except Exception as e:
+                    next_pending.append(url)
+                    msg = f"[{idx}/{current_total}] 失敗: {url}\n  エラー内容: {e}\n"
                     self.after(0, lambda m=msg: self._log_info(m))
 
-                def item_hook(saved_path):
-                    nonlocal success_count
-                    success_count += 1
-                    msg = f"[{idx}/{total_count}] 成功: {os.path.basename(saved_path)}\n"
-                    self.after(0, lambda m=msg: self._log_info(m))
-                    
-                saved_results = self.downloader.download(
-                    url, 
-                    progress_hook=hook, 
-                    playlist_progress_hook=plist_hook,
-                    item_completed_hook=item_hook
-                )
-            except Exception as e:
-                fail_count += 1
-                msg = f"[{idx}/{total_count}] 失敗: {url}\n  エラー内容: {e}\n"
-                self.after(0, lambda m=msg: self._log_info(m))
+            pending_urls = next_pending
+
+        failed_urls = pending_urls
+        fail_count  = len(failed_urls)
 
         # UI 復帰
         self.after(0, lambda: self._set_ui_state("normal"))
 
-        # 成功件数があれば URL 欄をクリア
-        if success_count > 0:
-            self.after(0, self._clear_url_textbox)
+        # 失敗したURLだけをURL欄に残す（全成功ならプレースホルダーに戻す）
+        self.after(0, lambda: self._restore_failed_urls(failed_urls))
 
+        retry_note = f" (自動再試行 {round_num - 1}回実施)" if round_num > 1 else ""
         summary_msg = (
-            f"\n=== 一括ダウンロード完了 ===\n"
+            f"\n=== 一括ダウンロード完了{retry_note} ===\n"
             f"成功: {success_count} 件 / 失敗: {fail_count} 件 / 合計: {total_count} 件"
         )
         self.after(0, lambda: self._log_info(summary_msg))
