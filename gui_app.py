@@ -15,7 +15,10 @@ import customtkinter as ctk
 from tkinter import filedialog, messagebox
 
 # バックエンドモジュールの読み込み
-from yt_downloader import PathSafeDownloader, update_yt_dlp, APP_BASE_DIR
+from yt_downloader import (
+    PathSafeDownloader, update_yt_dlp, APP_BASE_DIR,
+    get_current_ytdlp_version, detect_ytdlp_channel, switch_ytdlp_channel,
+)
 
 # CustomTkinter テーマ設定
 ctk.set_appearance_mode("Dark")
@@ -357,6 +360,7 @@ class SafeDownloaderGUI(ctk.CTk):
                 "firefox_cookie_cb", "embed_thumb_cb",
                 "format_option_menu", "custom_format_entry",
                 "max_bytes_entry", "font_option_menu",
+                "channel_option_menu", "channel_switch_btn",
             ]
             for name in popup_widgets:
                 widget = getattr(self, name, None)
@@ -461,7 +465,7 @@ class SafeDownloaderGUI(ctk.CTk):
         if self.settings_window is None or not self.settings_window.winfo_exists():
             self.settings_window = ctk.CTkToplevel(self)
             self.settings_window.title("詳細設定")
-            self.settings_window.geometry("500x320")
+            self.settings_window.geometry("500x420")
             self.settings_window.attributes("-topmost", True)
             
             # クッキー
@@ -526,8 +530,154 @@ class SafeDownloaderGUI(ctk.CTk):
             )
             self.font_option_menu.pack(side="left")
 
+            # --- yt-dlp 更新チャンネル切替 (stable / nightly) ---
+            ctk.CTkFrame(self.settings_window, height=1, fg_color="gray30").pack(
+                fill="x", padx=20, pady=(12, 8)
+            )
+
+            channel_frame = ctk.CTkFrame(self.settings_window, fg_color="transparent")
+            channel_frame.pack(padx=20, pady=(0, 15), fill="x")
+
+            self.ytdlp_channel_label = ctk.CTkLabel(
+                channel_frame, text="yt-dlp 更新チャンネル: 確認中...",
+                font=ctk.CTkFont(family=self.current_font_family, size=12),
+                anchor="w",
+            )
+            self.ytdlp_channel_label.pack(anchor="w")
+
+            channel_row = ctk.CTkFrame(channel_frame, fg_color="transparent")
+            channel_row.pack(fill="x", pady=(4, 0))
+
+            self.channel_select_var = ctk.StringVar(value="stable")
+            self.channel_option_menu = ctk.CTkOptionMenu(
+                channel_row, variable=self.channel_select_var,
+                values=["stable", "nightly"], width=110,
+                font=ctk.CTkFont(family=self.current_font_family, size=12),
+            )
+            self.channel_option_menu.pack(side="left")
+
+            self.channel_switch_btn = ctk.CTkButton(
+                channel_row, text="切替", width=70,
+                font=ctk.CTkFont(family=self.current_font_family, size=12),
+                command=self._on_channel_switch_clicked,
+            )
+            self.channel_switch_btn.pack(side="left", padx=(5, 0))
+
+            self.channel_note_label = ctk.CTkLabel(
+                channel_frame,
+                text="nightlyは修正が早く降ってくる開発版。ワンクリックでstableに戻せます。\n"
+                     "(切替後の反映にはアプリの再起動が必要です)",
+                font=ctk.CTkFont(family=self.current_font_family, size=10),
+                text_color="gray60", anchor="w", justify="left",
+            )
+            self.channel_note_label.pack(anchor="w", pady=(4, 0))
+
+            self._refresh_ytdlp_channel_label()
+
         else:
             self.settings_window.focus()
+
+    # ------------------------------------------------------------------ #
+    #  yt-dlp 更新チャンネル切替 (stable / nightly)                       #
+    # ------------------------------------------------------------------ #
+
+    def _refresh_ytdlp_channel_label(self):
+        """現在このプロセスで使用中のyt-dlpチャンネル・バージョン表示を更新"""
+        version = get_current_ytdlp_version()
+        channel = detect_ytdlp_channel(version)
+        if hasattr(self, "ytdlp_channel_label") and self.ytdlp_channel_label.winfo_exists():
+            self.ytdlp_channel_label.configure(
+                text=f"yt-dlp 更新チャンネル: 現在 {channel} ({version}) で稼働中"
+            )
+        if hasattr(self, "channel_select_var"):
+            self.channel_select_var.set(channel)
+
+    def _on_channel_switch_clicked(self):
+        """チャンネル切替ボタン押下時の処理（確認ダイアログ→バックグラウンド実行）"""
+        target_channel = self.channel_select_var.get()
+
+        if target_channel == "nightly":
+            title = "nightlyチャンネルへの切替"
+            message = (
+                "nightlyは開発中の最新版です。不具合修正が早く反映される一方、\n"
+                "まれに新しい不具合が混入することがあります。\n"
+                "ワンクリックでstableに戻せるのでご安心ください。\n\n"
+                "切り替えますか？"
+            )
+        else:
+            title = "stableチャンネルへの切替"
+            message = "安定版(stable)に切り替えます。よろしいですか？"
+
+        if not messagebox.askyesno(title, message):
+            return
+
+        self._set_channel_switch_busy(True)
+        threading.Thread(
+            target=self._channel_switch_worker, args=(target_channel,), daemon=True
+        ).start()
+
+    def _set_channel_switch_busy(self, busy: bool):
+        """切替処理中の二重実行防止＆状態表示"""
+        state = "disabled" if busy else "normal"
+        for widget_name in ("channel_option_menu", "channel_switch_btn"):
+            widget = getattr(self, widget_name, None)
+            if widget and widget.winfo_exists():
+                try:
+                    widget.configure(state=state)
+                except Exception:
+                    pass
+        # ダウンロード処理との同時実行を避ける
+        for widget in (self.preview_btn, self.download_btn, self.settings_btn):
+            try:
+                widget.configure(state=state)
+            except Exception:
+                pass
+        if hasattr(self, "channel_switch_btn") and self.channel_switch_btn.winfo_exists():
+            self.channel_switch_btn.configure(text="切替中..." if busy else "切替")
+
+    def _channel_switch_worker(self, target_channel: str):
+        def status_cb(msg: str):
+            self.after(0, lambda m=msg: self.status_label.configure(text=m))
+
+        result = switch_ytdlp_channel(target_channel, status_callback=status_cb)
+        self.after(0, lambda: self._on_channel_switch_done(target_channel, result))
+
+    def _on_channel_switch_done(self, target_channel: str, result: dict):
+        self._set_channel_switch_busy(False)
+
+        if result["ok"]:
+            if hasattr(self, "ytdlp_channel_label") and self.ytdlp_channel_label.winfo_exists():
+                self.ytdlp_channel_label.configure(
+                    text=(
+                        f"yt-dlp 更新チャンネル: {target_channel} ({result['new_version']}) に"
+                        f"切替完了 (要再起動)"
+                    )
+                )
+            self.status_label.configure(
+                text=f"チャンネル切替完了: {result['new_version']} (要再起動)"
+            )
+            messagebox.showinfo(
+                "切替完了",
+                f"{target_channel} チャンネルに切り替えました。\n"
+                f"{result['old_version']} → {result['new_version']}\n\n"
+                f"変更を反映するには、アプリを再起動してください。",
+            )
+        else:
+            error_messages = {
+                "network": "ネットワークに接続できないか、タイムアウトしました。通信環境をご確認の上、再度お試しください。",
+                "permission": (
+                    "ファイルのアクセス権限エラーです。他のPython/yt-dlpプロセスが実行中でないか"
+                    "確認し、アプリを再起動してから再度お試しください。"
+                ),
+                "pip_mismatch": "pipコマンドは実行されましたが、想定通りに切り替わりませんでした。",
+                "unknown": "予期しないエラーが発生しました。",
+            }
+            friendly = error_messages.get(result.get("error_type"), error_messages["unknown"])
+            self.status_label.configure(text="チャンネル切替失敗")
+            detail = (result.get("message") or "")[:400]
+            messagebox.showerror("切替失敗", f"{friendly}\n\n[詳細]\n{detail}")
+            # 失敗時は表示・選択欄を実際の現在値に戻す（変更前の状態を維持）
+            self._refresh_ytdlp_channel_label()
 
     def _on_format_changed(self, choice):
         """フォーマットのドロップダウン変更時のUI動的切り替え"""

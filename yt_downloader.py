@@ -54,6 +54,153 @@ def update_yt_dlp(status_callback: Optional[Callable[[str], None]] = None) -> bo
         return False
 
 
+# ---------------------------------------------------------------------- #
+#  yt-dlp 更新チャンネル切替 (stable / nightly)                            #
+#  このアプリは常に pip 経由で yt-dlp を導入・管理しているため、             #
+#  実行バイナリ(exe)版の `yt-dlp --update-to` は使用しない。                #
+# ---------------------------------------------------------------------- #
+
+# nightly のバージョン文字列は "YYYY.MM.DD.HHMMSS" 形式 (4分割)。
+# stable は "YYYY.MM.DD" 形式 (3分割)。実機検証済み。
+_NIGHTLY_VERSION_PATTERN = re.compile(r'^\d{4}\.\d{2}\.\d{2}\.\d+')
+
+YTDLP_CHANNEL_PACKAGES = ["yt-dlp", "yt-dlp-ejs"]
+
+
+def get_current_ytdlp_version() -> str:
+    """現在のPythonプロセスに読み込み済みのyt-dlpバージョンを返す"""
+    return yt_dlp.version.__version__
+
+
+def detect_ytdlp_channel(version: str) -> str:
+    """バージョン文字列から stable / nightly を判定"""
+    return "nightly" if _NIGHTLY_VERSION_PATTERN.match(version or "") else "stable"
+
+
+def get_installed_ytdlp_version_fresh(timeout: int = 30) -> Optional[str]:
+    """
+    新しいPythonサブプロセスで `import yt_dlp` を行い、ディスク上に実際に
+    インストールされているバージョンを取得する。
+    (現在起動中のプロセスに読み込み済みの yt_dlp モジュールは
+     pip で更新してもメモリ上には反映されないため、切替直後の確認には必ずこちらを使う)
+    """
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", "import yt_dlp; print(yt_dlp.version.__version__)"],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        version = result.stdout.strip()
+        return version or None
+    except Exception as e:
+        logger.warning(f"バージョン確認に失敗しました: {e}")
+        return None
+
+
+def switch_ytdlp_channel(
+    channel: str,
+    status_callback: Optional[Callable[[str], None]] = None,
+) -> Dict[str, Any]:
+    """
+    yt-dlp の更新チャンネルを pip 経由で切り替える。
+
+    戻り値:
+        {
+            "ok": bool,
+            "old_version": str,
+            "new_version": Optional[str],
+            "error_type": Optional[str],  # "network" / "permission" / "pip_mismatch" / "unknown"
+            "message": str,
+        }
+
+    注意: 切替に成功しても、現在起動中のアプリのプロセスにはすぐには反映されない
+    (import 済みの yt_dlp モジュールはメモリ上に残るため)。反映にはアプリの再起動が必要。
+    """
+    def _notify(msg: str) -> None:
+        logger.info(msg)
+        if status_callback:
+            status_callback(msg)
+
+    if channel not in ("stable", "nightly"):
+        raise ValueError(f"未対応のチャンネルです: {channel}")
+
+    old_version = get_current_ytdlp_version()
+
+    try:
+        if channel == "nightly":
+            _notify("nightlyチャンネルに切り替えています...")
+            cmd = [sys.executable, "-m", "pip", "install", "-U", "--pre", "yt-dlp[default]"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+        else:
+            # 注意: nightly(プレリリース版)が既に入っている状態で --pre 無しの
+            # `pip install -U` を実行しても、pipが「要件を満たしている」と判断して
+            # stableへ戻らないことが実機検証で確認されているため、
+            # 一旦アンインストールしてから入れ直す。
+            _notify("stableチャンネルに切り替えています (一旦アンインストールして入れ直します)...")
+            subprocess.run(
+                [sys.executable, "-m", "pip", "uninstall", "-y", *YTDLP_CHANNEL_PACKAGES],
+                capture_output=True, text=True, timeout=60,
+            )
+            cmd = [sys.executable, "-m", "pip", "install", "yt-dlp[default]"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False, "old_version": old_version, "new_version": None,
+            "error_type": "network",
+            "message": "処理がタイムアウトしました。ネットワーク接続をご確認ください。",
+        }
+    except Exception as e:
+        return {
+            "ok": False, "old_version": old_version, "new_version": None,
+            "error_type": "unknown", "message": str(e),
+        }
+
+    combined_output = (result.stdout or "") + "\n" + (result.stderr or "")
+
+    if result.returncode != 0:
+        lower = combined_output.lower()
+        if "permission" in lower or "winerror 5" in lower or "access is denied" in lower:
+            error_type = "permission"
+        elif "could not find a version" in lower or "no matching distribution" in lower:
+            error_type = "pip_mismatch"
+        elif (
+            "connection" in lower or "timed out" in lower or "temporary failure" in lower
+            or "network" in lower or "max retries exceeded" in lower
+        ):
+            error_type = "network"
+        else:
+            error_type = "unknown"
+        return {
+            "ok": False, "old_version": old_version, "new_version": None,
+            "error_type": error_type, "message": combined_output.strip()[-800:],
+        }
+
+    # pip の終了コードが0でも実際に変わったとは限らないため、
+    # 新しいサブプロセスを起動して実際にインストールされているバージョンを再確認する
+    new_version = get_installed_ytdlp_version_fresh()
+
+    if not new_version:
+        return {
+            "ok": False, "old_version": old_version, "new_version": None,
+            "error_type": "unknown", "message": "切替後のバージョン確認に失敗しました。",
+        }
+
+    if detect_ytdlp_channel(new_version) != channel:
+        return {
+            "ok": False, "old_version": old_version, "new_version": new_version,
+            "error_type": "pip_mismatch",
+            "message": (
+                f"pipコマンドは正常終了しましたが、切替後のバージョン ({new_version}) が"
+                f" {channel} チャンネルと一致しませんでした。"
+            ),
+        }
+
+    _notify(f"切替完了: {old_version} → {new_version}")
+    return {
+        "ok": True, "old_version": old_version, "new_version": new_version,
+        "error_type": None, "message": "切替に成功しました。",
+    }
+
+
 class YTDlpErrorCaptureLogger:
     """yt-dlp 内部のエラーメッセージをキャプチャしつつ、ignoreerrors 時の握りつぶしを防ぐカスタムロガー"""
     def __init__(self, fallback_logger: logging.Logger):
