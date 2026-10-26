@@ -13,7 +13,7 @@ goto START_APP
 
 :INSTALL_LIB
 echo [セットアップ] 必要なライブラリ (yt-dlp, customtkinter, curl_cffi) をインストールしています...
-python -m pip install yt-dlp customtkinter curl_cffi
+python -m pip install "yt-dlp[curl-cffi]" customtkinter
 if errorlevel 1 goto ERROR_PYTHON
 goto START_APP
 

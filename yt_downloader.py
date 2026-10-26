@@ -37,7 +37,10 @@ def update_yt_dlp(status_callback: Optional[Callable[[str], None]] = None) -> bo
 
     try:
         _notify("yt-dlp の更新チェック中...")
-        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp", "curl_cffi"]
+        # curl_cffi は yt-dlp が対応するバージョン範囲に収める必要がある。
+        # 単独で "curl_cffi" を --upgrade すると対応範囲外(例: 0.17)に上がり、
+        # ブラウザ偽装が無効化されてTikTok等が失敗するため、extra 指定で範囲を yt-dlp 側に任せる。
+        cmd = [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp[curl-cffi]"]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
         if "Successfully installed" in result.stdout:
