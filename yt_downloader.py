@@ -9,6 +9,8 @@ import re
 import sys
 import json
 import glob
+import base64
+import urllib.parse
 import time
 import logging
 import subprocess
@@ -23,6 +25,23 @@ logger = logging.getLogger("PathSafeDownloader")
 
 # アプリ本体のルートディレクトリ
 APP_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def normalize_account_hint(text: str) -> str:
+    """アカウントID指定を正規化する (先頭の @ / 全角＠ を除去し、最初の1語だけを採用)"""
+    tokens = (text or "").strip().lstrip("@＠").split()
+    return tokens[0].lstrip("@＠") if tokens else ""
+
+
+def split_url_and_hint(entry: str) -> Tuple[str, str]:
+    """
+    入力欄の1件分 ("URL" または "URL @アカウントID") を (URL, アカウントID) に分解する。
+    CDN直リンクのようにURLにアカウント名が含まれない場合、ファイル名用に手動でIDを渡すための記法。
+    """
+    parts = (entry or "").strip().split(None, 1)
+    if not parts:
+        return "", ""
+    return parts[0], normalize_account_hint(parts[1]) if len(parts) > 1 else ""
 
 
 def update_yt_dlp(status_callback: Optional[Callable[[str], None]] = None) -> bool:
@@ -463,8 +482,45 @@ class PathSafeDownloader:
                 return site_label
         return ""
 
-    def extract_clean_uploader(self, info: Dict[str, Any], url: str = "") -> str:
-        """SNS (X, TikTok, Instagram) および動画サイトからのアカウント名抽出"""
+    @staticmethod
+    def _is_instagram_story_url(candidate: str) -> bool:
+        """URL単体がInstagramストーリーズを指すか判定"""
+        if not candidate:
+            return False
+        try:
+            parsed = urllib.parse.urlparse(candidate)
+        except ValueError:
+            return False
+        # ストーリーページURL: instagram.com/stories/<user>/<id>
+        if "instagram.com" in (parsed.netloc or "").lower() and parsed.path.startswith("/stories/"):
+            return True
+        # CDN直リンク: efg パラメータ(base64url JSON)の vencode_tag に ".STORY." を含む
+        efg_values = urllib.parse.parse_qs(parsed.query).get("efg")
+        if efg_values:
+            efg = efg_values[0]
+            try:
+                decoded = base64.urlsafe_b64decode(efg + "=" * (-len(efg) % 4))
+                tag = str(json.loads(decoded).get("vencode_tag", ""))
+            except (ValueError, TypeError):
+                return False
+            return ".STORY." in tag.upper()
+        return False
+
+    def detect_instagram_story(self, info: Dict[str, Any], url: str = "") -> bool:
+        """Instagramストーリーズか判定 (ストーリーページURL / extractor / CDN直リンクのefg情報)"""
+        extractor = (info.get("extractor") or info.get("extractor_key") or "").lower()
+        if "instagram:story" in extractor or extractor == "instagramstory":
+            return True
+        return any(
+            self._is_instagram_story_url(c)
+            for c in (url, info.get("webpage_url"), info.get("original_url"), info.get("url"))
+        )
+
+    def extract_clean_uploader(self, info: Dict[str, Any], url: str = "", hint: str = "") -> str:
+        """SNS (X, TikTok, Instagram) および動画サイトからのアカウント名抽出 (hint=手動指定のアカウントID)"""
+        hint = normalize_account_hint(hint)
+        if hint:
+            return hint  # ユーザーが明示指定したIDを最優先する
         site_name   = self.detect_site_name(info, url)
         uploader_id = (info.get("uploader_id") or "").strip()
         uploader    = (info.get("uploader") or info.get("channel") or info.get("creator") or "").strip()
@@ -474,8 +530,13 @@ class PathSafeDownloader:
         if site_name == "instagram":
             handle = uploader
             if not handle or handle.isdigit():
-                handle = info.get("channel") or uploader_id or "Unknown"
-            return handle.strip().lstrip("@") or "Unknown"
+                handle = info.get("channel") or uploader_id or ""
+            if not handle:
+                # ストーリーページURL (instagram.com/stories/<user>/...) からアカウント名を補完
+                m = re.search(r'instagram\.com/stories/([^/?#]+)', info.get("webpage_url") or url, re.IGNORECASE)
+                if m and m.group(1).lower() != "highlights":
+                    handle = m.group(1)
+            return (handle or "Unknown").strip().lstrip("@") or "Unknown"
         if site_name == "tiktok":
             handle = uploader
             if not handle or handle.isdigit():
@@ -499,6 +560,13 @@ class PathSafeDownloader:
         description = (info.get("description") or info.get("caption") or "").strip()
         uploader_id = (info.get("uploader_id") or "").strip().lstrip("@")
         uploader    = (info.get("uploader") or info.get("channel") or "").strip().lstrip("@")
+
+        # ストーリーはタイトルが無い/"Story by xxx" 等の汎用名になるため、
+        # Instagram公式のメタ情報(vencode_tagのSTORY)に合わせて "story" で統一する
+        # (キャプションがあれば後ろに付ける)
+        if site_name == "instagram" and self.detect_instagram_story(info, url):
+            caption = re.sub(r'[\r\n]+', ' ', description).strip()
+            return f"story {caption}" if caption else "story"
 
         if site_name == "instagram" and description:
             text = description
@@ -675,6 +743,7 @@ class PathSafeDownloader:
         url: str,
         extra_ydl_opts: Optional[Dict[str, Any]] = None,
         progress_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
+        uploader_hint: str = "",
     ) -> Tuple[str, Dict[str, Any]]:
         """
         事前メタデータ取得 → 安全なパス計算 → 本番ダウンロード。
@@ -686,7 +755,7 @@ class PathSafeDownloader:
         upload_date = info.get("upload_date") or ""
         video_id    = info.get("id") or ""
         site_name   = self.detect_site_name(info, url)
-        uploader    = self.extract_clean_uploader(info, url)
+        uploader    = self.extract_clean_uploader(info, url, uploader_hint)
         title       = self.extract_clean_title(info, url)
 
         # 2. 安全なファイル名計算
@@ -853,9 +922,11 @@ class PathSafeDownloader:
         progress_hook: Optional[Callable[[Dict[str, Any]], None]] = None,
         playlist_progress_hook: Optional[Callable[[int, int, str], None]] = None,
         item_completed_hook: Optional[Callable[[str], None]] = None,
+        uploader_hint: str = "",
     ) -> List[Tuple[str, Dict[str, Any]]]:
         """
         URLの動画をダウンロードする（プレイリストの場合は展開してループ処理する）
+        uploader_hint: ファイル名に使うアカウントIDの手動指定 (URLから取れない場合用)
         """
         self.cancel_flag = False
 
@@ -866,7 +937,7 @@ class PathSafeDownloader:
                 progress_hook(d)
 
         if not self.download_playlist:
-            res = self._download_single(url, extra_ydl_opts, check_cancel_hook)
+            res = self._download_single(url, extra_ydl_opts, check_cancel_hook, uploader_hint)
             if item_completed_hook:
                 item_completed_hook(res[0])
             return [res]
@@ -888,7 +959,7 @@ class PathSafeDownloader:
         entries = list(entries_raw) if entries_raw else []
         if not entries:
             # エントリがない場合（単体動画の場合）
-            res = self._download_single(url, extra_ydl_opts, check_cancel_hook)
+            res = self._download_single(url, extra_ydl_opts, check_cancel_hook, uploader_hint)
             if item_completed_hook:
                 item_completed_hook(res[0])
             return [res]
@@ -960,7 +1031,7 @@ class PathSafeDownloader:
                 playlist_progress_hook(idx, total_items, item_url)
             logger.info(f"--- プレイリスト ({idx}/{total_items}) ---")
             try:
-                res = self._download_single(item_url, item_opts, check_cancel_hook)
+                res = self._download_single(item_url, item_opts, check_cancel_hook, uploader_hint)
                 results.append(res)
                 if item_completed_hook:
                     item_completed_hook(res[0])

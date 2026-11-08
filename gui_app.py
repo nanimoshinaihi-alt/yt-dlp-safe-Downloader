@@ -18,6 +18,7 @@ from tkinter import filedialog, messagebox
 from yt_downloader import (
     PathSafeDownloader, update_yt_dlp, APP_BASE_DIR,
     get_current_ytdlp_version, detect_ytdlp_channel, switch_ytdlp_channel,
+    split_url_and_hint, normalize_account_hint,
 )
 
 # CustomTkinter テーマ設定
@@ -418,16 +419,27 @@ class SafeDownloaderGUI(ctk.CTk):
     # ------------------------------------------------------------------ #
 
     def _get_input_urls(self) -> list:
-        """入力された有効な URL リストを抽出（http/https 始まりのみ受け付ける）"""
+        """
+        入力された有効な URL リストを抽出（http/https 始まりのみ受け付ける）。
+        URLの直後の行に「@アカウントID」(全角＠も可)があれば、そのURLのファイル名用IDとして対応付ける。
+        同じ行に「URL @ID」と書いてもよい。戻り値の各要素は "URL" または "URL @ID"。
+        """
         if self.is_placeholder_active:
             return []
         raw_text = self.url_textbox.get("1.0", "end")
-        urls = []
+        entries = []  # [url, hint]
         for line in raw_text.splitlines():
             line = line.strip()
-            if line and not line.startswith("#") and (line.startswith("http://") or line.startswith("https://")):
-                urls.append(line)
-        return urls
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith(("http://", "https://")):
+                url, hint = split_url_and_hint(line)
+                entries.append([url, hint])
+            elif line.startswith(("@", "＠")) and entries:
+                hint = normalize_account_hint(line)
+                if hint:
+                    entries[-1][1] = hint
+        return [f"{url} @{hint}" if hint else url for url, hint in entries]
 
     def _browse_dir(self):
         selected = filedialog.askdirectory(initialdir=self.dir_entry.get())
@@ -457,7 +469,14 @@ class SafeDownloaderGUI(ctk.CTk):
         self.url_textbox.configure(state="normal")
         self.url_textbox.delete("1.0", "end")
         self.url_textbox.configure(text_color=("black", "white"))
-        self.url_textbox.insert("1.0", "\n".join(failed_urls) + "\n")
+        # 「URL @ID」は入力時と同じ「URL / @ID の2行」に戻す
+        lines = []
+        for entry in failed_urls:
+            url, hint = split_url_and_hint(entry)
+            lines.append(url)
+            if hint:
+                lines.append(f"@{hint}")
+        self.url_textbox.insert("1.0", "\n".join(lines) + "\n")
         self.is_placeholder_active = False
 
     def _open_settings(self):
@@ -778,7 +797,8 @@ class SafeDownloaderGUI(ctk.CTk):
             self.after(0, lambda: self._log_info("--- 事前確認プレビュー ---", clear=True))
             total = len(urls)
 
-            for idx, url in enumerate(urls, 1):
+            for idx, entry in enumerate(urls, 1):
+                url, hint = split_url_and_hint(entry)
                 self.after(0, lambda i=idx, t=total: self.status_label.configure(
                     text=f"[{i}/{t}件目] メタデータ取得中..."
                 ))
@@ -787,7 +807,7 @@ class SafeDownloaderGUI(ctk.CTk):
                     upload_date = info.get("upload_date") or ""
                     video_id    = info.get("id") or ""
                     site_name   = downloader.detect_site_name(info, url)
-                    uploader    = downloader.extract_clean_uploader(info, url)
+                    uploader    = downloader.extract_clean_uploader(info, url, hint)
                     title       = downloader.extract_clean_title(info, url)
 
                     safe_name, safe_path = downloader.generate_safe_filename(
@@ -885,10 +905,13 @@ class SafeDownloaderGUI(ctk.CTk):
                     break
 
             next_pending: list = []
-            for idx, url in enumerate(current_batch, 1):
+            for idx, entry in enumerate(current_batch, 1):
                 if self._batch_cancel_requested:
                     next_pending.extend(current_batch[idx - 1:])
                     break
+
+                # entry は "URL" または "URL @アカウントID"。失敗時は entry のまま次ラウンド/入力欄へ戻す
+                url, hint = split_url_and_hint(entry)
 
                 self.after(0, lambda i=idx, t=current_total: self.status_label.configure(
                     text=f"[{i}/{t}件目] 処理準備中..."
@@ -910,15 +933,16 @@ class SafeDownloaderGUI(ctk.CTk):
                         url,
                         progress_hook=hook,
                         playlist_progress_hook=plist_hook,
-                        item_completed_hook=item_hook
+                        item_completed_hook=item_hook,
+                        uploader_hint=hint,
                     )
                     if not saved_results:
                         # 例外は出なかったが1件も成功しなかった場合（プレイリスト全滅等）も失敗扱い
-                        next_pending.append(url)
+                        next_pending.append(entry)
                         msg = f"[{idx}/{current_total}] 失敗: {url}\n  エラー内容: 有効な動画を1件も取得できませんでした\n"
                         self.after(0, lambda m=msg: self._log_info(m))
                 except Exception as e:
-                    next_pending.append(url)
+                    next_pending.append(entry)
                     msg = f"[{idx}/{current_total}] 失敗: {url}\n  エラー内容: {e}\n"
                     self.after(0, lambda m=msg: self._log_info(m))
 
